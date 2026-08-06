@@ -5799,3 +5799,143 @@ td.pdv-item-card:last-child {
 .btn-print-barcode i {
     font-size: 14px;
 }
+
+/* ============================================================
+   CORREÇÕES DE UI — ALINHAMENTO E BOTÕES
+   ============================================================ */
+
+/* ── 1. Modal de produto: alinhamento dos campos de preço ── */
+#box-prod-preco,
+#box-prod-preco + div { /* o irmão que contém o preço de compra */
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+}
+#box-prod-preco label,
+#box-prod-preco + div label {
+    margin-bottom: 6px;
+}
+#box-prod-preco .form-control,
+#box-prod-preco + div .form-control {
+    width: 100%;
+}
+/* Força ambos os campos a terem a mesma altura e alinhamento */
+#modal-produto .form-group > div[style*="display:flex"] {
+    align-items: flex-start !important;
+}
+/* Ajusta o tamanho do campo de markup preview para não quebrar */
+#prod-markup-preview {
+    min-height: 20px;
+    font-size: 0.75rem;
+}
+
+/* ── 2. Botões de ação na lista de produtos ── */
+.produto-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: center;
+    align-items: center;
+}
+.produto-card-actions .btn {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    padding: 0 4px !important;
+    font-size: 0.7rem !important;
+    border-radius: 6px !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+/* Reduz o tamanho dos ícones dentro dos botões */
+.produto-card-actions .btn i {
+    font-size: 0.75rem !important;
+    line-height: 1;
+}
+/* Em telas muito pequenas, ajusta ainda mais */
+@media (max-width: 768px) {
+    .produto-card-actions .btn {
+        width: 28px !important;
+        height: 28px !important;
+        min-width: 28px !important;
+        font-size: 0.65rem !important;
+    }
+    .produto-card-actions .btn i {
+        font-size: 0.7rem !important;
+    }
+}
+/* Ações da coluna na tabela (desktop) – dá um pouco mais de espaço */
+.produto-card-actions {
+    padding: 4px 0;
+}
+/* Para o grid de produtos, aumenta a largura da coluna de ações se necessário */
+@media (min-width: 769px) {
+    .produto-card {
+        grid-template-columns: 32px 2.8fr 90px 130px 100px 70px 120px;
+    }
+    /* Se ainda estiver apertado, reduz outras colunas */
+    .produto-card .produto-card-preco,
+    .produto-card .produto-card-estoque {
+        font-size: 0.75rem;
+    }
+}
+/* Botão de imprimir etiqueta – também ajustado */
+.btn-print-barcode {
+    padding: 4px 8px !important;
+    font-size: 0.7rem !important;
+    gap: 4px !important;
+}
+.btn-print-barcode i {
+    font-size: 0.7rem !important;
+}
+
+/* ============================================================
+   CORREÇÃO: ALINHAMENTO DOS CAMPOS DE PREÇO NO MODAL
+   ============================================================ */
+
+/* Força o container flex a alinhar os itens pelo topo e ocupar toda a largura */
+#modal-produto .form-group > div[style*="display:flex"] {
+    align-items: stretch !important;
+}
+
+/* Cada coluna de preço deve ser flex column com altura total */
+#box-prod-preco,
+#box-prod-preco + div {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+}
+
+/* Labels com altura fixa para não desalinhar */
+#box-prod-preco label,
+#box-prod-preco + div label {
+    height: 38px; /* mesma altura do input */
+    display: flex;
+    align-items: center;
+    margin-bottom: 0;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #34495e;
+    white-space: nowrap;
+}
+
+/* Inputs ocupam o espaço restante */
+#box-prod-preco .form-control,
+#box-prod-preco + div .form-control {
+    width: 100%;
+    height: 42px;
+    margin-top: 4px;
+}
+
+/* Os previews (R$ e markup) devem ficar abaixo, sem interferir no alinhamento */
+#vc-preview-modal,
+#prod-markup-preview {
+    min-height: 20px;
+    margin-top: 4px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+

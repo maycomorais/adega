@@ -9095,8 +9095,16 @@ function adicionarItemPDV(p) {
 
   // Simples / Lanche / Bebida / Combo — adiciona direto
   const existe = carrinhoPDV.find((i) => i.id === p.id && !i.variacao);
+  const item = { 
+    ...p, 
+    qtd: 1, 
+    montagem: [], 
+    obs: "",
+    variacao_id: null  // ← ADICIONADO: campo para variação (não há)
+  };
   if (existe) existe.qtd++;
-  else carrinhoPDV.push({ ...p, qtd: 1, montagem: [], obs: "" });
+  else carrinhoPDV.push(item);
+  
   atualizarCarrinhoPDV();
 
   if (_deveMostrarExtrasGlobais(p)) {
@@ -9604,6 +9612,7 @@ function _pdvModalConfirmar(cacheKey) {
     if (v) {
       preco = v.preco || preco;
       variacaoLabel = v.nome;
+      variacaoId = v.id;  // ← CAPTURA O ID DA VARIAÇÃO
     }
   } else if (tipo === "pizza") {
     const tamIdx = parseInt(
@@ -9727,6 +9736,7 @@ function _pdvModalConfirmar(cacheKey) {
     preco,
     qtd: 1,
     variacao: variacaoLabel,
+    variacao_id: variacaoId,
     montagem,
     obs,
   });
@@ -9892,6 +9902,7 @@ function _mostrarModalPesoPDV(produto, precoKg) {
       es_bebida: produto.es_bebida || false,
       montagem: [],
       obs: "",
+      variacao_id: null
     });
     atualizarCarrinhoPDV();
     overlay.remove();
@@ -10099,6 +10110,7 @@ function _mostrarModalVariacaoPDV(produto, variacoes) {
           preco: v.preco || p.preco || 0,
           qtd: 1,
           variacao: v.nome,
+          variacao_id: v.id || null,
           montagem: [],
           obs: "",
         });
@@ -10202,6 +10214,7 @@ function _mostrarUpsellExtrasPDV(produto, extras) {
           preco: extra.preco || 0,
           qtd: 1,
           _isExtra: true,
+          variacao_id: null
         });
       }
       atualizarCarrinhoPDV();
@@ -10811,6 +10824,7 @@ async function salvarPedidoBalcao() {
     ...(i._isKg
       ? { peso_gramas: i.peso_gramas, preco_kg: i.preco_kg, _isKg: true }
       : {}),
+    variacao_id: i.variacao_id || null,
     status_item: "pendente", // ← campo de status por item
     lancado_em: new Date().toISOString(),
   }));
@@ -13246,84 +13260,95 @@ function _todosBebidas(itens) {
 async function _descontarEstoqueVendaItens(itens) {
   try {
     if (!itens?.length) return;
-    const prodIds = [
-      ...new Set(itens.map((i) => i.produto_id || i.id).filter(Boolean)),
-    ];
-    if (!prodIds.length) return;
-    const { data: prods } = await supa
-      .from("produtos")
-      .select("id, inventario_id, estoque_qtd")
-      .in("id", prodIds);
-    if (!prods?.length) return;
 
-    // 🔧 CORREÇÃO: função auxiliar para extrair a quantidade
-    const getQtd = (item) => {
-      const q = item.qtd ?? item.q ?? item.quantidade ?? 1;
-      return parseInt(q) || 1;
-    };
-
-    const qtdVendidaPorProduto = {};
-    itens.forEach((item) => {
-      const pid = Number(item.produto_id || item.id);
-      if (!pid) return;
-      const qtd = getQtd(item);
-      qtdVendidaPorProduto[pid] = (qtdVendidaPorProduto[pid] || 0) + qtd;
-    });
-
-    // ── Caminho 1: inventario_id ──────────────────────────────────────
-    const descontos = {};
-    prods.forEach((prod) => {
-      if (!prod.inventario_id) return;
-      const qtdVendida = qtdVendidaPorProduto[prod.id];
-      if (!qtdVendida) return;
-      descontos[prod.inventario_id] =
-        (descontos[prod.inventario_id] || 0) + qtdVendida;
-    });
-
-    if (Object.keys(descontos).length > 0) {
-      const invIds = Object.keys(descontos).map(Number);
-      const { data: estoques } = await supa
-        .from("inventario")
-        .select("id, quantidade")
-        .in("id", invIds);
-      for (const est of estoques || []) {
-        const nova = Math.max(0, (est.quantidade ?? 0) - descontos[est.id]);
-        await supa.from("inventario").update({ quantidade: nova }).eq("id", est.id);
-        await supa
-          .from("inventario_movimentos")
-          .insert([
-            {
-              inventario_id: est.id,
-              tipo: "sub",
-              quantidade: descontos[est.id],
-              motivo: "Venda PDV (balcão)",
-              usuario_email: "sistema",
-            },
-          ])
-          .then(() => {})
-          .catch(() => {});
+    // 1. Desconta variações individuais (via RPC)
+    for (const item of itens) {
+      const variacaoId = item.variacao_id || item.variacaoId || null;
+      const qtd = parseInt(item.qtd || item.q || 1) || 1;
+      if (variacaoId) {
+        // Chama a função RPC que decrementa com lock
+        const { data, error } = await supa.rpc('decrementar_estoque_variacao', {
+          p_variacao_id: variacaoId,
+          p_quantidade: qtd
+        });
+        if (error) {
+          console.warn(`Erro ao descontar variação ${variacaoId}:`, error);
+        } else if (data && !data.ok) {
+          console.warn(`Estoque insuficiente para variação ${variacaoId}:`, data.erro);
+        }
       }
     }
 
-    // ── Caminho 2: estoque_qtd direto no produto ─────────────────────
-    const produtosComEstoqueQtd = prods.filter(
-      (p) => p.estoque_qtd !== null && p.estoque_qtd !== undefined,
-    );
-    for (const prod of produtosComEstoqueQtd) {
-      const qtdVendida = qtdVendidaPorProduto[prod.id];
-      if (!qtdVendida) continue;
-      const novaQtd = Math.max(0, (prod.estoque_qtd || 0) - qtdVendida);
-      const updatePayload = { estoque_qtd: novaQtd };
-      // Auto-pause: se zerou, pausar produto para não aparecer no APP/PDV
-      if (novaQtd === 0) updatePayload.ativo = false;
-      await supa.from("produtos").update(updatePayload).eq("id", prod.id);
+    // 2. Desconta estoque total do produto (estoque_qtd)
+    // Agrupa por produto_id
+    const prodQtdMap = {};
+    itens.forEach(item => {
+      const prodId = item.produto_id || item.id;
+      if (!prodId) return;
+      const qtd = parseInt(item.qtd || item.q || 1) || 1;
+      prodQtdMap[prodId] = (prodQtdMap[prodId] || 0) + qtd;
+    });
+
+    const prodIds = Object.keys(prodQtdMap).map(Number);
+    if (prodIds.length) {
+      // Busca produtos com estoque_qtd (que não sejam apenas inventario_id)
+      const { data: prods } = await supa
+        .from('produtos')
+        .select('id, estoque_qtd, inventario_id')
+        .in('id', prodIds);
+
+      for (const prod of prods || []) {
+        const qtdVendida = prodQtdMap[prod.id] || 0;
+        if (prod.estoque_qtd !== null && prod.estoque_qtd !== undefined) {
+          // Desconta do estoque direto do produto
+          const novaQtd = Math.max(0, (prod.estoque_qtd || 0) - qtdVendida);
+          await supa
+            .from('produtos')
+            .update({ estoque_qtd: novaQtd })
+            .eq('id', prod.id);
+
+          // Auto-pause se zerou (opcional)
+          if (novaQtd === 0) {
+            await supa
+              .from('produtos')
+              .update({ ativo: false })
+              .eq('id', prod.id);
+          }
+        }
+
+        // Se o produto tem inventario_id, desconta também do inventário
+        if (prod.inventario_id) {
+          const { data: estoque } = await supa
+            .from('inventario')
+            .select('quantidade')
+            .eq('id', prod.inventario_id)
+            .single();
+          if (estoque) {
+            const novaQtd = Math.max(0, (estoque.quantidade || 0) - qtdVendida);
+            await supa
+              .from('inventario')
+              .update({ quantidade: novaQtd })
+              .eq('id', prod.inventario_id);
+            // Registra movimento
+            await supa
+              .from('inventario_movimentos')
+              .insert([{
+                inventario_id: prod.inventario_id,
+                tipo: 'sub',
+                quantidade: qtdVendida,
+                motivo: 'Venda PDV (balcão)',
+                usuario_email: 'sistema'
+              }])
+              .then(() => {})
+              .catch(() => {});
+          }
+        }
+      }
     }
 
-    console.log(
-      `✅ Estoque descontado: ${Object.keys(descontos).length + produtosComEstoqueQtd.length} item(s)`,
-    );
+    console.log(`✅ Estoque descontado: ${itens.length} itens`);
   } catch (e) {
-    console.warn("Estoque desconto (itens):", e.message);
+    console.warn('Erro ao descontar estoque (itens):', e.message);
   }
 }
 
