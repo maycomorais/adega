@@ -46,17 +46,23 @@ async function notasInicializar() {
 }
 
 async function notasCarregar() {
-  const { data, error } = await supa
-    .from('pedidos')
-    .select('id, created_at, cliente_nome, cliente_telefone, itens, total_geral, forma_pagamento, obs_pagamento, status, tipo_entrega, quitado_em, forma_pagamento_quitacao')
-    .eq('forma_pagamento', 'NaNota')
-    .order('created_at', { ascending: false });
+  try {
+    console.log('[notasCarregar] Iniciando...');
+    const { data, error } = await supa
+      .from('pedidos')
+      .select('id, created_at, cliente_nome, cliente_telefone, itens, total_geral, forma_pagamento, obs_pagamento, status, tipo_entrega, quitado_em, forma_pagamento_quitacao')
+      .eq('forma_pagamento', 'NaNota')
+      .order('created_at', { ascending: false });
 
-  if (error) { console.error('notasCarregar:', error); return; }
-  _notas_pedidos = data || [];
-  notasAgrupar();
-  notasRenderKPIs();
-  notasRenderLista();
+    if (error) { console.error('notasCarregar error:', error); return; }
+    _notas_pedidos = data || [];
+    console.log(`[notasCarregar] ${_notas_pedidos.length} pedidos carregados.`);
+    notasAgrupar();
+    notasRenderKPIs();
+    notasRenderLista();
+  } catch (e) {
+    console.error('notasCarregar exception:', e);
+  }
 }
 
 // ── AGRUPAR POR CLIENTE ───────────────────────────────────────

@@ -224,6 +224,47 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  const pagSelect = document.getElementById('balcao-pag');
+  if (pagSelect && !document.getElementById('pdv-cliente-nota-container')) {
+    const container = document.createElement('div');
+    container.id = 'pdv-cliente-nota-container';
+    container.style.display = 'none';
+    container.style.marginTop = '12px';
+    container.style.marginBottom = '8px';
+    container.style.background = '#f8fafc';
+    container.style.padding = '12px';
+    container.style.borderRadius = '10px';
+    container.style.border = '1px solid #e2e8f0';
+    container.innerHTML = `
+      <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 6px; color: #1e293b;">📋 Cliente (para Nota)</label>
+      <div style="display: flex; gap: 6px; align-items: center; position: relative;">
+        <div style="flex: 1; position: relative;">
+          <input id="pdv-cliente-busca" type="text" name="pdv_busca_cliente_nota_xk9"
+                 placeholder="Buscar por nome ou telefone"
+                 autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                 data-lpignore="true" data-form-type="other"
+                 style="width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.9rem;"
+                 oninput="pdvFiltrarClienteDropdown(this)"
+                 onfocus="pdvMostrarClienteDropdown(this)"
+                 onblur="pdvEsconderClienteDropdown()">
+          <div id="pdv-cliente-dropdown"
+               style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; max-height:220px; overflow-y:auto;
+                      background:#fff; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,0.12); z-index:9999;">
+          </div>
+        </div>
+        <button type="button" onclick="pdvAbrirCadastroCliente()"
+                style="padding: 8px 14px; background: #3498db; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; white-space: nowrap;">
+          + Novo
+        </button>
+      </div>
+      <div style="font-size: 0.72rem; color: #888; margin-top: 4px;">Clique ou digite para buscar entre os clientes cadastrados</div>
+    `;
+    // Insere logo após o select de pagamento
+    pagSelect.parentNode.insertBefore(container, pagSelect.nextSibling);
+  }
+  // Carrega clientes e ajusta visibilidade inicial
+  pdvCarregarClientes();
+  pdvAtualizarClienteNota();
   initMensalistas()
 
   // === DESBLOQUEIO DE SOM — AudioContext (sem AbortError) ===
@@ -416,16 +457,26 @@ function showTab(tabId, event) {
       // ignorando qualquer sub-aba salva de navegação anterior (ex: Categorias).
       showSubTab("lista-produtos-wrapper");
     }
+  }
 
-    if (realTabId === 'mensalistas') {
-      if (typeof initMensalistas === 'function') initMensalistas();
+  if (realTabId === 'mensalistas') {
+    if (typeof initMensalistas === 'function') initMensalistas();
+  }
+  if (realTabId === 'notas') {
+    // Força o carregamento da lista com um pequeno delay para garantir que a DOM já foi atualizada
+    const loading = document.getElementById('notas-loading');
+    if (loading) loading.style.display = 'flex';
+    if (typeof notasCarregar === 'function') {
+      setTimeout(async () => {
+        await notasCarregar();
+        if (loading) loading.style.display = 'none';
+      }, 50);
+    } else if (typeof notasInicializar === 'function') {
+      notasInicializar(); // fallback
     }
-    if (realTabId === 'notas') {
-      if (typeof notasInicializar === 'function') notasInicializar();
-    }
-    if (realTabId === 'facturacion') {
-      if (typeof initFacturacion === 'function') initFacturacion();
-    }
+  }
+  if (realTabId === 'facturacion') {
+    if (typeof initFacturacion === 'function') initFacturacion();
   }
 
   // 6. Carregamento de dados
@@ -781,6 +832,7 @@ function iniciarRealtime() {
     .subscribe();
 }
 
+// ── Variáveis de estado ──────────────────────────────────────
 let loopAlarme = null;
 let _alarmePlaying = false;
 
@@ -3018,28 +3070,22 @@ async function carregarRelatorio() {
     const isPDV = p.tipo_entrega === "balcao";
 
     const itensList = (p.itens || [])
-      .map((i) => {
-        const qtd = i.qtd || i.q || 1;
-        const nome = i.nome || i.n || "?";
-        const variacao = i.variacao || i.t || "";
-        const montagem = i.montagem || i.m || [];
-        let lbl = `<strong>${qtd}x</strong> ${nome}`;
-        if (variacao && variacao !== nome)
-          lbl += ` <span style="color:#e67e22">▸ ${variacao}</span>`;
-        if (montagem.length > 0) {
-          const montagemHtml = montagem
-            .map((linha) => {
-              const idx = linha.indexOf(":");
-              if (idx > 0)
-                return `<strong>${linha.slice(0, idx)}:</strong> ${linha.slice(idx + 1).trim()}`;
-              return linha;
-            })
-            .join(" · ");
-          lbl += ` <span style="color:#555;font-size:0.78em">(${montagemHtml})</span>`;
-        }
-        return lbl;
-      })
-      .join("<br>");
+  .map((i) => {
+    const qtd = i.qtd || i.q || 1;
+    const nome = i.nome || i.n || "?";
+    const variacao = i.variacao || i.t || "";
+    const montagem = i.montagem || i.m || [];
+    let lbl = `<strong>${qtd}x</strong> ${nome}`;
+    // EXIBE A VARIAÇÃO COM DESTAQUE
+    if (variacao && variacao !== nome) {
+      lbl += ` <span style="color:#e67e22; font-weight:700;">[${variacao}]</span>`;
+    } else if (variacao) {
+      lbl += ` <span style="color:#888; font-size:0.8em;">(${variacao})</span>`;
+    }
+    // ... resto do código (montagem, etc.)
+    return lbl;
+  })
+  .join("<br>");
 
     // Cancelamento info
     let cancelInfo = "";
@@ -4792,9 +4838,34 @@ async function salvarProduto() {
     }
 
     // ── Salva variações de estoque (varejo) ───────────────────
-    if (prodIdSalvo && document.getElementById("secao-variacoes-estoque")) {
-      await veSalvarVariacoes(prodIdSalvo);
-    }
+    // ── Salva variações de estoque (varejo) ───────────────────
+if (prodIdSalvo && document.getElementById("secao-variacoes-estoque")) {
+  await veSalvarVariacoes(prodIdSalvo);
+
+  // === NOVA PARTE: Atualiza montagem_config para o PDV ===
+  const { data: variacoes } = await supa
+    .from("produto_variacoes")
+    .select("id, nome, preco_adicional, preco_absoluto, ativo, ordem")
+    .eq("produto_id", prodIdSalvo)
+    .order("ordem");
+
+  if (variacoes && variacoes.length > 0) {
+    const config = {
+      __tipo: "variacoes",
+      variacoes: variacoes.map(v => ({
+        id: v.id,
+        nome: v.nome,
+        preco: v.preco_adicional || 0,
+        preco_absoluto: v.preco_absoluto || false,
+        ativo: v.ativo !== false,
+      }))
+    };
+    await supa
+      .from("produtos")
+      .update({ montagem_config: config })
+      .eq("id", prodIdSalvo);
+  }
+}
     // ── Fim variações ─────────────────────────────────────────
 
     fecharModal("modal-produto");
@@ -8541,6 +8612,8 @@ async function carregarPDV() {
   _pdvAtualizarPainelCaixa();
 
   renderizarGridPDV();
+  pdvCarregarClientes(); // Garante que o datalist esteja populado
+  setTimeout(() => pdvAtualizarClienteNota(), 100); // Força a atualização do seletor
   atualizarBarraMesasAtivas();
   pdvIniciarTabs();
 }
@@ -9166,23 +9239,26 @@ function _mostrarModalOpcoesPDV(produto, tipo) {
 
   // ── VARIAÇÕES ────────────────────────────────────────────────
   if (tipo === "variacoes") {
-    const ativas = (cfg.variacoes || []).filter((v) => v.ativo !== false);
-    corpo().innerHTML = `<p style="font-size:0.82rem;color:#555;margin-bottom:10px;font-weight:600">Escolha a variação:</p>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        ${ativas
-          .map(
-            (v, i) => `
-          <label style="display:flex;align-items:center;gap:12px;border:2px solid #e5e7eb;border-radius:10px;padding:10px 12px;cursor:pointer;transition:all .15s"
-            onclick="this.closest('div').querySelectorAll('label').forEach(l=>l.style.borderColor='#e5e7eb');this.style.borderColor='var(--primary)';this.style.background='#f0fff4'">
-            <input type="radio" name="_pdv_var" value="${i}" style="width:18px;height:18px" ${i === 0 ? "checked" : ""}>
-            ${v.img || produto.imagem_url ? `<img src="${v.img || produto.imagem_url}" style="width:44px;height:44px;border-radius:8px;object-fit:cover" onerror="this.style.display='none'">` : ""}
-            <div style="flex:1"><div style="font-weight:700;font-size:0.9rem">${v.nome}</div></div>
-            <div style="font-weight:700;color:var(--primary)">Gs ${(v.preco || produto.preco || 0).toLocaleString("es-PY")}</div>
-          </label>`,
-          )
-          .join("")}
-      </div>`;
-  }
+  const ativas = (cfg.variacoes || []).filter((v) => v.ativo !== false);
+  corpo().innerHTML = `<p style="font-size:0.82rem;color:#555;margin-bottom:10px;font-weight:600">Escolha a variação:</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${ativas
+        .map(
+          (v, i) => {
+            const precoExibido = (v.preco_adicional && v.preco_adicional > 0) ? v.preco_adicional : produto.preco;
+            return `
+            <label style="display:flex;align-items:center;gap:12px;border:2px solid #e5e7eb;border-radius:10px;padding:10px 12px;cursor:pointer;transition:all .15s"
+              onclick="this.closest('div').querySelectorAll('label').forEach(l=>l.style.borderColor='#e5e7eb');this.style.borderColor='var(--primary)';this.style.background='#f0fff4'">
+              <input type="radio" name="_pdv_var" value="${i}" style="width:18px;height:18px" ${i === 0 ? "checked" : ""}>
+              ${v.img || produto.imagem_url ? `<img src="${v.img || produto.imagem_url}" style="width:44px;height:44px;border-radius:8px;object-fit:cover" onerror="this.style.display='none'">` : ""}
+              <div style="flex:1"><div style="font-weight:700;font-size:0.9rem">${v.nome}</div></div>
+              <div style="font-weight:700;color:var(--primary)">Gs ${precoExibido.toLocaleString("es-PY")}</div>
+            </label>`;
+          }
+        )
+        .join("")}
+    </div>`;
+}
 
   // ── PIZZA ────────────────────────────────────────────────────
   else if (tipo === "pizza") {
@@ -9605,14 +9681,13 @@ function _pdvModalConfirmar(cacheKey) {
   let variacaoLabel = "";
 
   if (tipo === "variacoes") {
-    const idx = parseInt(
-      modal.querySelector('input[name="_pdv_var"]:checked')?.value ?? 0,
-    );
+    const idx = parseInt(modal.querySelector('input[name="_pdv_var"]:checked')?.value ?? 0);
     const v = (cfg.variacoes || [])[idx];
     if (v) {
-      preco = v.preco || preco;
+      // Se a variação tem preço próprio (>0), usa ele; senão usa o preço base do produto
+      preco = (v.preco_adicional && v.preco_adicional > 0) ? v.preco_adicional : produto.preco;
       variacaoLabel = v.nome;
-      variacaoId = v.id;  // ← CAPTURA O ID DA VARIAÇÃO
+      variacaoId = v.id;
     }
   } else if (tipo === "pizza") {
     const tamIdx = parseInt(
@@ -10812,22 +10887,21 @@ async function salvarPedidoBalcao() {
 
   // ── Novos itens ganham status_item: 'pendente' ─────────────────
   const novosItens = carrinhoPDV.map((i) => ({
-    produto_id: i.produto_id || i.id,
-    id: i.id || Date.now() + Math.random(),
-    nome: i.nome,
-    preco: i.preco,
-    qtd: i.qtd,
-    montagem: i.montagem || [],
-    obs: i.obs || "",
-    categoria_slug: i.categoria_slug || "",
-    es_bebida: i.es_bebida || false,
-    ...(i._isKg
-      ? { peso_gramas: i.peso_gramas, preco_kg: i.preco_kg, _isKg: true }
-      : {}),
-    variacao_id: i.variacao_id || null,
-    status_item: "pendente", // ← campo de status por item
-    lancado_em: new Date().toISOString(),
-  }));
+  produto_id: i.produto_id || i.id,
+  id: i.id || Date.now() + Math.random(),
+  nome: i.nome,
+  preco: i.preco,
+  qtd: i.qtd,
+  montagem: i.montagem || [],
+  obs: i.obs || "",
+  categoria_slug: i.categoria_slug || "",
+  es_bebida: i.es_bebida || false,
+  ...(i._isKg ? { peso_gramas: i.peso_gramas, preco_kg: i.preco_kg, _isKg: true } : {}),
+  variacao_id: i.variacao_id || null,
+  variacao: i.variacao || "",   // ← ADICIONE ESTA LINHA
+  status_item: "pendente",
+  lancado_em: new Date().toISOString(),
+}));
 
   if (window._mesaAbertaId) {
     // ── UPDATE: mantém itens existentes (com seus status_item atuais)
@@ -10978,6 +11052,37 @@ async function salvarPedidoBalcao() {
     // PDV já desconta o estoque logo após o insert; marca para evitar duplo desconto
     estoque_descontado: true,
   };
+
+  if (pag === 'NaNota') {
+  const nomeCliente = document.getElementById('balcao-cliente')?.value?.trim();
+  const telCliente = document.getElementById('balcao-telefone')?.value?.trim();
+  if (_pdvClienteSelecionadoId) {
+    pedido.cliente_id = _pdvClienteSelecionadoId;
+  } else if (nomeCliente && telCliente) {
+    // Tenta buscar ou criar
+    const { data: existing } = await supa
+      .from('clientes')
+      .select('id')
+      .eq('telefone', telCliente)
+      .maybeSingle();
+    if (existing) {
+      pedido.cliente_id = existing.id;
+      _pdvClienteSelecionadoId = existing.id;
+    } else {
+      const { data: novo, error } = await supa
+        .from('clientes')
+        .insert([{ nome: nomeCliente, telefone: telCliente, cashback_saldo: 0, total_gasto: 0 }])
+        .select('id')
+        .single();
+      if (!error && novo) {
+        pedido.cliente_id = novo.id;
+        _pdvClienteSelecionadoId = novo.id;
+        // Atualiza cache
+        _pdvClientesCache.push({ id: novo.id, nome: nomeCliente, telefone: telCliente });
+      }
+    }
+  }
+}
 
   const { data: novoPedido, error } = await supa
     .from("pedidos")
@@ -12235,26 +12340,40 @@ async function gerarEstatisticas() {
     if (error) throw error;
 
     // Agrega por produto
-    const mapa = {};
-    let faturamentoTotal = 0;
-    let totalPedidos = (data || []).length;
+    // Agrega por produto + variação
+const mapa = {};
+let faturamentoTotal = 0;
+let totalPedidos = (data || []).length;
 
-    (data || []).forEach((ped) => {
-      faturamentoTotal += ped.total_geral || ped.subtotal || 0;
-      (Array.isArray(ped.itens) ? ped.itens : []).forEach((item) => {
-        const nome = item.nome || item.n || "Produto";
-        const preco = item.preco || item.p || 0;
-        const qtd = item.qtd || item.q || 1;
-        const cat = item.categoria_slug || item.cat || "";
-        const unid = item.unidade_venda || item.unid || "un";
-        if (!mapa[nome])
-          mapa[nome] = { nome, preco, cat, unid, qtd: 0, fat: 0 };
-        mapa[nome].qtd += qtd;
-        mapa[nome].fat += preco * qtd;
-      });
-    });
+(data || []).forEach((ped) => {
+  faturamentoTotal += ped.total_geral || ped.subtotal || 0;
+  (Array.isArray(ped.itens) ? ped.itens : []).forEach((item) => {
+    const nomeBase = item.nome || item.n || "Produto";
+    const variacao = item.variacao || item.t || "";
+    // Chave composta: nomeBase + (variacao ? " (" + variacao + ")" : "")
+    const chave = variacao ? `${nomeBase} (${variacao})` : nomeBase;
+    const preco = item.preco || item.p || 0;
+    const qtd = item.qtd || item.q || 1;
+    const cat = item.categoria_slug || item.cat || "";
+    const unid = item.unidade_venda || item.unid || "un";
+    if (!mapa[chave]) {
+      mapa[chave] = {
+        nome: chave,          // nome exibido (com variação)
+        nomeBase,             // guardamos para referência
+        variacao,
+        preco,
+        cat,
+        unid,
+        qtd: 0,
+        fat: 0,
+      };
+    }
+    mapa[chave].qtd += qtd;
+    mapa[chave].fat += preco * qtd;
+  });
+});
 
-    _estDados = Object.values(mapa).sort((a, b) => b.fat - a.fat);
+_estDados = Object.values(mapa).sort((a, b) => b.fat - a.fat);
 
     // KPIs
     const ticket =
@@ -13266,6 +13385,7 @@ async function _descontarEstoqueVendaItens(itens) {
       const variacaoId = item.variacao_id || item.variacaoId || null;
       const qtd = parseInt(item.qtd || item.q || 1) || 1;
       if (variacaoId) {
+        console.log(`🔄 Descontando variação ${variacaoId}, qtd ${qtd}`);
         // Chama a função RPC que decrementa com lock
         const { data, error } = await supa.rpc('decrementar_estoque_variacao', {
           p_variacao_id: variacaoId,
@@ -13366,7 +13486,6 @@ async function _descontarEstoqueVendaItens(itens) {
 async function _descontarEstoqueVenda(pedidoId, itensDireto) {
   try {
     let itens = itensDireto;
-    // Se não tiver itens diretos, busca do banco
     if (!itens) {
       const { data: pedido } = await supa
         .from("pedidos")
@@ -13377,98 +13496,99 @@ async function _descontarEstoqueVenda(pedidoId, itensDireto) {
     }
     if (!itens?.length) return;
 
-    // Busca produto_ids
-    const prodIds = [
-      ...new Set(itens.map((i) => i.produto_id || i.id).filter(Boolean)),
-    ];
+    // ------------------------------------------------------------
+    // 1. Desconta o estoque das variações (via RPC) para todos os itens
+    //    que possuem 'variacao_id'
+    // ------------------------------------------------------------
+    await _descontarEstoqueVendaItens(itens);
+
+    // ------------------------------------------------------------
+    // 2. Desconta o estoque geral APENAS dos itens SEM variacao_id
+    //    (itens simples, sem variação)
+    // ------------------------------------------------------------
+    const itensSemVariacao = itens.filter(item => !item.variacao_id);
+    if (!itensSemVariacao.length) {
+      // Se todos os itens têm variação, não há mais o que fazer aqui.
+      return;
+    }
+
+    // Soma quantidades por produto (apenas itens sem variação)
+    const qtdPorProduto = {};
+    itensSemVariacao.forEach((item) => {
+      const pid = Number(item.produto_id || item.id);
+      if (!pid) return;
+      const qtd = parseInt(item.qtd || item.q || 1) || 1;
+      qtdPorProduto[pid] = (qtdPorProduto[pid] || 0) + qtd;
+    });
+
+    const prodIds = Object.keys(qtdPorProduto).map(Number);
     if (!prodIds.length) return;
 
-    // Busca TODOS os produtos vendidos (não filtra por inventario_id aqui,
-    // porque também precisamos dos que controlam estoque via estoque_qtd)
+    // Busca produtos (para saber se têm inventario_id e/ou estoque_qtd)
     const { data: prods } = await supa
       .from("produtos")
       .select("id, inventario_id, estoque_qtd")
       .in("id", prodIds);
+
     if (!prods?.length) return;
 
-    // 🔧 CORREÇÃO: função auxiliar para extrair a quantidade
-    const getQtd = (item) => {
-      const q = item.qtd ?? item.q ?? item.quantidade ?? 1;
-      return parseInt(q) || 1;
-    };
-
-    // Soma quantidades vendidas por produto
-    const qtdVendidaPorProduto = {};
-    itens.forEach((item) => {
-      const pid = Number(item.produto_id || item.id);
-      if (!pid) return;
-      const qtd = getQtd(item);
-      qtdVendidaPorProduto[pid] = (qtdVendidaPorProduto[pid] || 0) + qtd;
-    });
-
-    // ── Caminho 1: produtos com inventario_id (estoque vinculado) ────────
+    // 2a. Desconta via inventario_id (estoque vinculado a insumos)
     const descontosInventario = {};
     prods.forEach((prod) => {
       if (!prod.inventario_id) return;
-      const qtdVendida = qtdVendidaPorProduto[prod.id];
-      if (!qtdVendida) return;
-      descontosInventario[prod.inventario_id] =
-        (descontosInventario[prod.inventario_id] || 0) + qtdVendida;
+      const qtd = qtdPorProduto[prod.id] || 0;
+      if (qtd > 0) {
+        descontosInventario[prod.inventario_id] =
+          (descontosInventario[prod.inventario_id] || 0) + qtd;
+      }
     });
 
-    if (Object.keys(descontosInventario).length > 0) {
+    if (Object.keys(descontosInventario).length) {
       const invIds = Object.keys(descontosInventario).map(Number);
       const { data: estoques } = await supa
         .from("inventario")
         .select("id, quantidade")
         .in("id", invIds);
       for (const est of estoques || []) {
-        const nova = Math.max(
-          0,
-          (est.quantidade ?? 0) - descontosInventario[est.id],
-        );
+        const nova = Math.max(0, (est.quantidade || 0) - descontosInventario[est.id]);
         await supa.from("inventario").update({ quantidade: nova }).eq("id", est.id);
         await supa
           .from("inventario_movimentos")
-          .insert([
-            {
-              inventario_id: est.id,
-              tipo: "sub",
-              quantidade: descontosInventario[est.id],
-              motivo: pedidoId ? `Venda — Pedido #${pedidoId}` : "Venda PDV",
-              usuario_email: "sistema",
-            },
-          ])
+          .insert([{
+            inventario_id: est.id,
+            tipo: "sub",
+            quantidade: descontosInventario[est.id],
+            motivo: pedidoId ? `Venda — Pedido #${pedidoId}` : "Venda PDV",
+            usuario_email: "sistema",
+          }])
           .then(() => {})
           .catch(() => {});
       }
     }
 
-    // ── Caminho 2: produtos com estoque_qtd (controle direto no produto) ─
-    // Só desconta se o produto efetivamente controla estoque (campo não nulo)
-    const produtosComEstoqueQtd = prods.filter(
-      (p) => p.estoque_qtd !== null && p.estoque_qtd !== undefined,
-    );
-    for (const prod of produtosComEstoqueQtd) {
-      const qtdVendida = qtdVendidaPorProduto[prod.id];
-      if (!qtdVendida) continue;
-      const novaQtd = Math.max(0, (prod.estoque_qtd || 0) - qtdVendida);
+    // 2b. Desconta estoque_qtd direto no produto (para itens sem inventario_id)
+    for (const prod of prods) {
+      if (prod.inventario_id) continue; // já descontado acima
+      const qtd = qtdPorProduto[prod.id] || 0;
+      if (!qtd) continue;
+      if (prod.estoque_qtd === null || prod.estoque_qtd === undefined) continue;
+      const novaQtd = Math.max(0, (prod.estoque_qtd || 0) - qtd);
       const updatePayload = { estoque_qtd: novaQtd };
-      // Auto-pause: se zerou, pausar produto para não aparecer no APP/PDV
       if (novaQtd === 0) updatePayload.ativo = false;
-      await supa
-        .from("produtos")
-        .update(updatePayload)
-        .eq("id", prod.id);
+      await supa.from("produtos").update(updatePayload).eq("id", prod.id);
     }
 
-    const totalDescontado =
-      Object.keys(descontosInventario).length + produtosComEstoqueQtd.length;
     console.log(
-      `✅ Estoque descontado: pedido ${pedidoId || "(PDV)"}, ${totalDescontado} item(s)`,
+      `✅ Estoque descontado: pedido ${pedidoId || "(PDV)"}, ` +
+      `${itensSemVariacao.length} item(s) sem variação, ` +
+      `${itens.length - itensSemVariacao.length} com variação (via RPC)`
     );
   } catch (e) {
-    console.warn("Estoque desconto:", e.message);
+    console.warn("_descontarEstoqueVenda:", e.message);
+  }
+  const idsProdutosAfetados = [...new Set(itens.map(i => i.produto_id || i.id).filter(Boolean))];
+  for (const prodId of idsProdutosAfetados) {
+    await supa.rpc('atualizar_estoque_total_produto_manual', { p_produto_id: prodId });
   }
 }
 
@@ -13551,6 +13671,85 @@ async function _reporEstoqueCancelamento(pedidoId) {
     console.log(`✅ Estoque reposto: pedido cancelado #${pedidoId}`);
   } catch (e) {
     console.warn("_reporEstoqueCancelamento:", e.message);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CASHBACK — Geração e uso de crédito de clientes.
+   Estas funções eram chamadas em salvarPedidoBalcao() mas nunca
+   haviam sido definidas (ReferenceError, quebrava a finalização
+   da venda logo após o pedido já ter sido salvo no banco).
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * Gera cashback (crédito) para o cliente com base no valor da venda,
+ * usando o percentual e validade configurados em CRM > Configurações.
+ */
+async function crmGerarCashback(telefone, valorVenda, pedidoId = null) {
+  try {
+    if (!telefone || !valorVenda || valorVenda <= 0) return;
+
+    const pct = typeof _crmCashbackPct === "number" ? _crmCashbackPct : 2;
+    const validadeDias = typeof _crmCashbackVal === "number" ? _crmCashbackVal : 30;
+    if (pct <= 0) return;
+
+    const valorCashback = Math.round(valorVenda * (pct / 100));
+    if (valorCashback <= 0) return;
+
+    const { data: cliente } = await supa
+      .from("clientes")
+      .select("id, cashback_saldo")
+      .eq("telefone", telefone)
+      .maybeSingle();
+
+    await supa.from("cashback_transacoes").insert([{
+      cliente_id: cliente?.id || null,
+      cliente_telefone: telefone,
+      pedido_id: pedidoId,
+      tipo: "credito",
+      valor: valorCashback,
+      validade_dias: validadeDias,
+      usado: false,
+    }]);
+
+    if (cliente?.id) {
+      const novoSaldo = (cliente.cashback_saldo || 0) + valorCashback;
+      await supa.from("clientes").update({ cashback_saldo: novoSaldo }).eq("id", cliente.id);
+    }
+    console.log(`✅ Cashback gerado: Gs ${valorCashback} para ${telefone}`);
+  } catch (e) {
+    console.warn("crmGerarCashback:", e.message);
+  }
+}
+
+/**
+ * Debita cashback do saldo do cliente ao ser usado como desconto numa venda.
+ */
+async function crmUsarCashback(telefone, valorUsado) {
+  try {
+    if (!telefone || !valorUsado || valorUsado <= 0) return;
+
+    const { data: cliente } = await supa
+      .from("clientes")
+      .select("id, cashback_saldo")
+      .eq("telefone", telefone)
+      .maybeSingle();
+    if (!cliente) return;
+
+    await supa.from("cashback_transacoes").insert([{
+      cliente_id: cliente.id,
+      cliente_telefone: telefone,
+      tipo: "debito",
+      valor: valorUsado,
+      validade_dias: 0,
+      usado: true,
+    }]);
+
+    const novoSaldo = Math.max(0, (cliente.cashback_saldo || 0) - valorUsado);
+    await supa.from("clientes").update({ cashback_saldo: novoSaldo }).eq("id", cliente.id);
+    console.log(`✅ Cashback usado: Gs ${valorUsado} de ${telefone}`);
+  } catch (e) {
+    console.warn("crmUsarCashback:", e.message);
   }
 }
 
@@ -15074,109 +15273,50 @@ function _veCriarLinhaDOM(v, idx) {
   row.dataset.idx = idx;
 
   row.innerHTML = `
-    <!-- Nome da variação -->
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <input
-        type="text"
-        class="form-control ve-nome"
-        value="${_esc(v.nome)}"
-        placeholder="Ex: Azul - M, 110v, Melancia"
-        oninput="_veAtualizar(${idx}, 'nome', this.value)"
-        style="font-weight:600"
-      >
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <!-- SKU -->
-        <input
-          type="text"
-          class="form-control"
-          value="${_esc(v.sku || "")}"
-          placeholder="SKU / Cód. barras (opcional)"
-          oninput="_veAtualizar(${idx}, 'sku', this.value)"
-          style="flex:1;min-width:110px;font-size:0.8rem;color:#777"
-        >
-        <!-- Sobrepreço -->
-        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
-          <span style="font-size:0.78rem;color:#777;white-space:nowrap">
-            <input
-              type="checkbox"
-              title="Preço absoluto (substitui preço base)"
-              ${v.preco_absoluto ? "checked" : ""}
-              onchange="_veAtualizar(${idx}, 'preco_absoluto', this.checked)"
-              style="margin-right:3px"
-            >+ Gs
-          </span>
-          <input
-            type="number"
-            class="form-control"
-            value="${v.preco_adicional || 0}"
-            min="0"
-            oninput="_veAtualizar(${idx}, 'preco_adicional', parseFloat(this.value)||0)"
-            style="width:110px"
-            title="Sobrepreço (0 = usa preço base). Marque ☑ para preço fixo absoluto."
-          >
+    <!-- Coluna 1: Nome + SKU + Preço próprio -->
+    <div class="ve-col-info">
+      <input type="text" class="form-control ve-nome" value="${_esc(v.nome)}" placeholder="Ex: Azul - M, 110v, Melancia" oninput="_veAtualizar(${idx}, 'nome', this.value)" style="font-weight:600; width:100%;">
+      <div class="ve-row-fields">
+        <input type="text" class="form-control ve-sku" value="${_esc(v.sku || "")}" placeholder="SKU / Cód. barras (opcional)" oninput="_veAtualizar(${idx}, 'sku', this.value)" style="flex:1; min-width:100px; font-size:0.8rem; color:#555;">
+        <div class="ve-preco-wrapper">
+          <span class="ve-preco-label">Preço próprio (Gs)</span>
+          <input type="number" class="form-control ve-preco" value="${v.preco_adicional || ''}" min="0" oninput="_veAtualizar(${idx}, 'preco_adicional', parseFloat(this.value)||0)" style="width:120px;" placeholder="deixe em branco">
         </div>
       </div>
-      <!-- Controla estoque toggle -->
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.8rem;color:#555">
-        <input
-          type="checkbox"
-          ${v.controlar_estoque ? "checked" : ""}
-          onchange="_veAtualizar(${idx}, 'controlar_estoque', this.checked); _veRenderizarLista()"
-        >
+      <label class="ve-controla-estoque">
+        <input type="checkbox" ${v.controlar_estoque ? "checked" : ""} onchange="_veAtualizar(${idx}, 'controlar_estoque', this.checked); _veRenderizarLista()">
         Controlar estoque
       </label>
     </div>
 
-    <!-- Quantidade em estoque -->
-    <div class="var-estoque-row__estoque" style="display:flex;flex-direction:column;align-items:center;gap:4px">
-      <label style="font-size:0.7rem;color:#777;font-weight:700;text-align:center">ESTOQUE</label>
-      <div style="display:flex;align-items:center;gap:4px">
-        <button type="button"
-          onclick="_veAlterarQtd(${idx}, -1)"
-          style="width:28px;height:28px;border-radius:6px;border:1.5px solid #ccc;background:#fff;cursor:pointer;font-size:1rem;line-height:1"
-          ${!v.controlar_estoque ? 'disabled style="opacity:0.3;cursor:not-allowed"' : ""}
-        >−</button>
-        <input
-          type="number"
-          class="form-control ve-qtd"
-          value="${v.estoque_qtd}"
-          min="0"
-          oninput="_veAtualizar(${idx}, 'estoque_qtd', parseInt(this.value)||0); _veAtualizarTotalizador()"
-          style="width:56px;text-align:center;font-weight:700"
-          ${!v.controlar_estoque ? 'disabled placeholder="∞"' : ""}
-        >
-        <button type="button"
-          onclick="_veAlterarQtd(${idx}, 1)"
-          style="width:28px;height:28px;border-radius:6px;border:1.5px solid #ccc;background:#fff;cursor:pointer;font-size:1rem;line-height:1"
-          ${!v.controlar_estoque ? 'disabled style="opacity:0.3;cursor:not-allowed"' : ""}
-        >+</button>
+    <!-- Coluna 2: Estoque (com botões + input) -->
+    <div class="ve-col-estoque">
+      <label class="ve-label">ESTOQUE</label>
+      <div class="ve-qtd-control">
+        <button type="button" onclick="_veAlterarQtd(${idx}, -1)" class="ve-qtd-btn" ${!v.controlar_estoque ? 'disabled' : ''}>−</button>
+        <input type="number" class="form-control ve-qtd" value="${v.estoque_qtd}" min="0" oninput="_veAtualizar(${idx}, 'estoque_qtd', parseInt(this.value)||0); _veAtualizarTotalizador()" ${!v.controlar_estoque ? 'disabled placeholder="∞"' : ''}>
+        <button type="button" onclick="_veAlterarQtd(${idx}, 1)" class="ve-qtd-btn" ${!v.controlar_estoque ? 'disabled' : ''}>+</button>
       </div>
-      ${esgotado ? '<span class="var-estoque-row__badge">Esgotado</span>' : ""}
-      ${!v.controlar_estoque ? '<span style="font-size:0.68rem;color:#888">∞ ilimitado</span>' : ""}
+      ${esgotado ? '<span class="ve-badge-esgotado">Esgotado</span>' : ''}
+      ${!v.controlar_estoque ? '<span class="ve-ilimitado">∞ ilimitado</span>' : ''}
     </div>
 
-    <!-- Ativo toggle -->
-    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
-      <label style="font-size:0.7rem;color:#777;font-weight:700">STATUS</label>
+    <!-- Coluna 3: Status (toggle) -->
+    <div class="ve-col-status">
+      <label class="ve-label">STATUS</label>
       <label class="toggle-switch" title="${v.ativo ? "Disponível" : "Pausado"}">
-        <input
-          type="checkbox"
-          ${v.ativo ? "checked" : ""}
-          onchange="_veAtualizar(${idx}, 'ativo', this.checked)"
-        >
+        <input type="checkbox" ${v.ativo ? "checked" : ""} onchange="_veAtualizar(${idx}, 'ativo', this.checked)">
         <span class="toggle-slider"></span>
       </label>
-      <span style="font-size:0.68rem;color:${v.ativo ? "#16a34a" : "#dc2626"}">${v.ativo ? "Disponível" : "Pausado"}</span>
+      <span class="ve-status-text" style="color:${v.ativo ? "#16a34a" : "#dc2626"}">${v.ativo ? "Disponível" : "Pausado"}</span>
     </div>
 
-    <!-- Botão remover -->
-    <button
-      type="button"
-      class="btn btn-sm btn-danger"
-      onclick="veRemoverLinha(${idx})"
-      title="Remover variação"
-      style="align-self:start"
-    >✕</button>
+    <!-- Coluna 4: Remover -->
+    <div class="ve-col-remove">
+      <button type="button" class="btn-remove-variacao" onclick="veRemoverLinha(${idx})" title="Remover variação">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
   `;
 
   return row;
@@ -15242,17 +15382,15 @@ function _veAtualizarTotalizador() {
 // ──────────────────────────────────────────────────────────────
 async function veSalvarVariacoes(prodId) {
   try {
-    // ── Sincroniza estado dos inputs com _ve_variacoes ─────────
+    // Sincroniza estado dos inputs com _ve_variacoes
     _veLerDOMParaEstado();
 
-    // ── IDs que existiam antes (para detectar exclusões) ───────
+    // IDs que existiam antes (para detectar exclusões)
     const idsSalvos = _ve_variacoesSalvas.filter((v) => v.id).map((v) => v.id);
-
     const idsAtuais = _ve_variacoes.filter((v) => v.id).map((v) => v.id);
-
     const idsRemovidos = idsSalvos.filter((id) => !idsAtuais.includes(id));
 
-    // ── Exclui variações removidas ──────────────────────────────
+    // Exclui variações removidas
     if (idsRemovidos.length > 0) {
       const { error } = await supa
         .from("produto_variacoes")
@@ -15261,7 +15399,7 @@ async function veSalvarVariacoes(prodId) {
       if (error) throw new Error("Erro ao excluir variações: " + error.message);
     }
 
-    // ── Upsert das variações restantes ─────────────────────────
+    // Upsert das variações restantes
     if (_ve_variacoes.length > 0) {
       const payload = _ve_variacoes
         .filter((v) => v.nome && v.nome.trim()) // ignora linhas sem nome
@@ -15275,15 +15413,18 @@ async function veSalvarVariacoes(prodId) {
               : 0,
             controlar_estoque: !!v.controlar_estoque,
             preco_adicional: parseFloat(v.preco_adicional) || 0,
-            preco_absoluto: !!v.preco_absoluto,
             ativo: v.ativo !== false,
             ordem: i,
           };
-          if (v.id) obj.id = v.id; // inclui id para UPDATE
+          // ⚠️ SÓ inclui o campo 'id' se ele existir e for um número > 0
+          if (v.id && Number(v.id) > 0) {
+            obj.id = Number(v.id);
+          }
           return obj;
         });
 
       if (payload.length > 0) {
+        // Usa upsert com conflito em 'id' (se houver)
         const { error } = await supa
           .from("produto_variacoes")
           .upsert(payload, { onConflict: "id" });
@@ -16521,3 +16662,315 @@ function imprimirCodigoBarras(codigo, nomeProduto, preco) {
   doc.head.appendChild(script);
 }
 
+// ============================================================
+//  PDV – SELEÇÃO DE CLIENTES PARA "NA NOTA"
+// ============================================================
+
+let _pdvClienteSelecionadoId = null;
+let _pdvClientesCache = [];
+
+/**
+ * Carrega a lista de clientes cadastrados para o dropdown do PDV.
+ */
+async function pdvCarregarClientes() {
+  const { data, error } = await supa
+    .from('clientes')
+    .select('id, nome, telefone')
+    .order('nome');
+  if (error) {
+    console.warn('pdvCarregarClientes:', error.message);
+    return;
+  }
+  _pdvClientesCache = data || [];
+}
+
+/**
+ * Atualiza a interface do PDV quando a forma de pagamento é "NaNota".
+ * Mostra o seletor de clientes.
+ */
+function pdvAtualizarClienteNota() {
+  const pag = document.getElementById('balcao-pag')?.value;
+  const container = document.getElementById('pdv-cliente-nota-container');
+  if (!container) return;
+
+  if (pag === 'NaNota') {
+    container.style.display = 'block';
+    if (_pdvClientesCache.length === 0) pdvCarregarClientes();
+    // Preenche o campo de busca com o nome/telefone atual, se houver
+    const nomeCliente = document.getElementById('balcao-cliente')?.value || '';
+    const telCliente = document.getElementById('balcao-telefone')?.value || '';
+    const buscaInput = document.getElementById('pdv-cliente-busca');
+    if (buscaInput && (nomeCliente || telCliente)) {
+      buscaInput.value = nomeCliente + (telCliente ? ` (${telCliente})` : '');
+    }
+  } else {
+    container.style.display = 'none';
+    pdvEsconderClienteDropdown(true);
+  }
+}
+
+/**
+ * Renderiza a lista de clientes filtrada dentro do dropdown customizado
+ * (substitui o antigo <datalist>, que deixava o navegador assumir o
+ * autocomplete e preencher os campos com dados salvos incorretos).
+ */
+function _pdvRenderClienteDropdown(lista) {
+  const dropdown = document.getElementById('pdv-cliente-dropdown');
+  if (!dropdown) return;
+
+  if (!lista.length) {
+    dropdown.innerHTML = `
+      <div style="padding:10px 12px;font-size:0.82rem;color:#94a3b8;">
+        Nenhum cliente encontrado. Use "+ Novo" para cadastrar.
+      </div>`;
+    dropdown.style.display = 'block';
+    return;
+  }
+
+  dropdown.innerHTML = lista
+    .slice(0, 30)
+    .map(c => `
+      <div class="pdv-cliente-dropdown-item"
+           onmousedown="pdvSelecionarClienteDropdown(${c.id})"
+           style="padding:9px 12px;font-size:0.87rem;cursor:pointer;border-bottom:1px solid #f1f5f9;"
+           onmouseover="this.style.background='#f0f9ff'"
+           onmouseout="this.style.background='#fff'">
+        <div style="font-weight:600;color:#1e293b;">${c.nome}</div>
+        ${c.telefone ? `<div style="font-size:0.75rem;color:#64748b;">${c.telefone}</div>` : ''}
+      </div>`)
+    .join('');
+  dropdown.style.display = 'block';
+}
+
+/**
+ * Filtra os clientes conforme o usuário digita (nome ou telefone).
+ * Não depende mais do <datalist>/autocomplete nativo do navegador.
+ */
+function pdvFiltrarClienteDropdown(input) {
+  // Qualquer digitação invalida uma seleção anterior até que o
+  // usuário escolha explicitamente um item da lista.
+  _pdvClienteSelecionadoId = null;
+
+  const termo = input.value.trim().toLowerCase();
+  const lista = termo
+    ? _pdvClientesCache.filter(c =>
+        c.nome.toLowerCase().includes(termo) ||
+        (c.telefone || '').toLowerCase().includes(termo)
+      )
+    : _pdvClientesCache;
+
+  _pdvRenderClienteDropdown(lista);
+
+  // Mantém o campo "Cliente (opcional)" sincronizado com o texto livre
+  // digitado, mas sem tentar adivinhar telefone a partir do texto —
+  // isso só é preenchido ao selecionar um cliente da lista.
+  const balcaoCliente = document.getElementById('balcao-cliente');
+  if (balcaoCliente) balcaoCliente.value = input.value;
+}
+
+/**
+ * Exibe o dropdown ao focar/clicar no campo de busca.
+ */
+function pdvMostrarClienteDropdown(input) {
+  if (_pdvClientesCache.length === 0) {
+    pdvCarregarClientes().then(() => _pdvRenderClienteDropdown(_pdvClientesCache));
+  } else {
+    const termo = input.value.trim().toLowerCase();
+    const lista = termo
+      ? _pdvClientesCache.filter(c =>
+          c.nome.toLowerCase().includes(termo) ||
+          (c.telefone || '').toLowerCase().includes(termo)
+        )
+      : _pdvClientesCache;
+    _pdvRenderClienteDropdown(lista);
+  }
+}
+
+/**
+ * Esconde o dropdown. Usa um pequeno atraso para que o clique num item
+ * (onmousedown) seja processado antes do blur fechar a lista.
+ */
+function pdvEsconderClienteDropdown(imediato = false) {
+  const fechar = () => {
+    const dropdown = document.getElementById('pdv-cliente-dropdown');
+    if (dropdown) dropdown.style.display = 'none';
+  };
+  if (imediato) fechar();
+  else setTimeout(fechar, 150);
+}
+
+/**
+ * Seleciona um cliente cadastrado a partir do dropdown customizado.
+ */
+function pdvSelecionarClienteDropdown(id) {
+  const match = _pdvClientesCache.find(c => c.id === id);
+  if (!match) return;
+
+  _pdvClienteSelecionadoId = match.id;
+  const buscaInput = document.getElementById('pdv-cliente-busca');
+  if (buscaInput) buscaInput.value = match.nome + (match.telefone ? ` (${match.telefone})` : '');
+  document.getElementById('balcao-cliente').value = match.nome;
+  document.getElementById('balcao-telefone').value = match.telefone || '';
+
+  pdvEsconderClienteDropdown(true);
+}
+
+/**
+ * Abre um modal simples para cadastrar um novo cliente.
+ */
+function pdvAbrirCadastroCliente() {
+  document.getElementById('pdv-modal-cadastro-cliente')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'pdv-modal-cadastro-cliente';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 99999; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  `;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div style="background: #fff; border-radius: 16px; padding: 24px; max-width: 380px; width: 100%;">
+      <h3 style="margin-top: 0; margin-bottom: 16px;">📝 Cadastrar Cliente</h3>
+      <div style="margin-bottom: 12px;">
+        <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 4px;">Nome *</label>
+        <input id="pdv-novo-cliente-nome" type="text" class="form-control" placeholder="Ex: João Silva" style="width: 100%;">
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 4px;">Telefone *</label>
+        <input id="pdv-novo-cliente-tel" type="text" class="form-control" placeholder="Ex: 595981234567" style="width: 100%;">
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button onclick="pdvSalvarNovoCliente()" style="flex: 2; padding: 10px; background: #1a7a2e; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;">
+          Salvar
+        </button>
+        <button onclick="this.closest('#pdv-modal-cadastro-cliente').remove()" style="flex: 1; padding: 10px; background: #f0f0f0; border: none; border-radius: 8px; cursor: pointer;">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('pdv-novo-cliente-nome')?.focus(), 100);
+}
+
+/**
+ * Salva o novo cliente e o seleciona no PDV.
+ */
+async function pdvSalvarNovoCliente() {
+  const nome = document.getElementById('pdv-novo-cliente-nome')?.value.trim();
+  const telefone = document.getElementById('pdv-novo-cliente-tel')?.value.trim();
+  if (!nome || !telefone) {
+    alert('Preencha nome e telefone.');
+    return;
+  }
+
+  // Verifica se já existe cliente com esse telefone
+  const { data: existing } = await supa
+    .from('clientes')
+    .select('id')
+    .eq('telefone', telefone)
+    .maybeSingle();
+  if (existing) {
+    alert('Já existe um cliente com este telefone. Selecionando-o...');
+    _pdvClienteSelecionadoId = existing.id;
+    const { data: cli } = await supa.from('clientes').select('nome, telefone').eq('id', existing.id).single();
+    if (cli) {
+      document.getElementById('balcao-cliente').value = cli.nome;
+      document.getElementById('balcao-telefone').value = cli.telefone;
+    }
+    document.getElementById('pdv-modal-cadastro-cliente')?.remove();
+    pdvCarregarClientes();
+    return;
+  }
+
+  // Insere novo cliente
+  const { data: novo, error } = await supa
+    .from('clientes')
+    .insert([{ nome, telefone, cashback_saldo: 0, total_gasto: 0 }])
+    .select('id, nome, telefone')
+    .single();
+
+  if (error) {
+    alert('Erro ao cadastrar cliente: ' + error.message);
+    return;
+  }
+
+  _pdvClientesCache.push(novo);
+  _pdvClientesCache.sort((a, b) => a.nome.localeCompare(b.nome));
+  _pdvClienteSelecionadoId = novo.id;
+  document.getElementById('balcao-cliente').value = novo.nome;
+  document.getElementById('balcao-telefone').value = novo.telefone || '';
+  document.getElementById('pdv-modal-cadastro-cliente')?.remove();
+
+  const buscaInput = document.getElementById('pdv-cliente-busca');
+  if (buscaInput) buscaInput.value = novo.nome + (novo.telefone ? ` (${novo.telefone})` : '');
+}
+
+// ──────────────────────────────────────────────────────────────
+//  INTEGRAÇÃO COM O FLUXO EXISTENTE
+// ──────────────────────────────────────────────────────────────
+
+// Salva a referência da função original para não perdê-la
+const _origAtualizarInfoPagPDV = window.atualizarInfoPagPDV;
+
+// Sobrescreve a função para incluir a atualização do seletor de cliente
+window.atualizarInfoPagPDV = function(total) {
+  if (typeof _origAtualizarInfoPagPDV === 'function') {
+    _origAtualizarInfoPagPDV(total);
+  }
+  pdvAtualizarClienteNota();
+};
+
+// Patch na função salvarPedidoBalcao para incluir cliente_id
+// (o bloco já foi adicionado dentro da função original, mas garantimos que
+// a variável _pdvClienteSelecionadoId esteja disponível)
+// ATENÇÃO: a função salvarPedidoBalcao já foi modificada no seu código,
+// portanto não a sobrescrevemos novamente aqui. Apenas garantimos que
+// as variáveis e funções acima estejam definidas.
+
+// ──────────────────────────────────────────────────────────────
+//  INICIALIZAÇÃO (executar no DOMContentLoaded)
+// ──────────────────────────────────────────────────────────────
+
+// Esta parte deve ser chamada após o carregamento da página.
+// Se você já tem um listener DOMContentLoaded, adicione estas linhas lá.
+
+// Exemplo de como deve ser chamado (coloque dentro do seu DOMContentLoaded):
+/*
+  // Cria o container do seletor de cliente se não existir
+  
+*/
+
+/**
+ * Registra uma movimentação de caixa (entrada/saída) vinculada a uma sessão.
+ * @param {Object} params
+ * @param {string} params.tipo - 'entrada' ou 'saida'
+ * @param {number} params.valor
+ * @param {string} params.descricao
+ * @param {string} params.usuario_email
+ * @param {number} params.sessao_id
+ * @param {string} params.forma_pagamento - opcional
+ * @returns {Promise<boolean>}
+ */
+async function registrarMovimentacaoCaixa(params) {
+  try {
+    const { tipo, valor, descricao, usuario_email, sessao_id, forma_pagamento } = params;
+    if (!sessao_id) throw new Error('Sessão de caixa não informada');
+    const insert = {
+      tipo: tipo,
+      valor: valor,
+      descricao: descricao || '',
+      usuario_email: usuario_email || 'admin',
+      sessao_id: sessao_id,
+      forma_pagamento: forma_pagamento || null,
+    };
+    const { error } = await supa.from('movimentacoes_caixa').insert([insert]);
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error('registrarMovimentacaoCaixa:', e);
+    return false;
+  }
+}

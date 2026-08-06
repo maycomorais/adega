@@ -24,6 +24,7 @@ const ADMIN_LANGS = {
     'sidebar.estoque':      'Estoque',
     'sidebar.turnos':       'Turnos',
     'sidebar.sair':         'Sair',
+    'sidebar.facturacion': 'Faturação',
 
     // ── Dashboard ──────────────────────────────────────────
     'dash.title':           'Painel de Controle',
@@ -651,6 +652,7 @@ const ADMIN_LANGS = {
     'sidebar.estoque':      'Stock',
     'sidebar.turnos':       'Turnos',
     'sidebar.sair':         'Salir',
+    'sidebar.facturacion': 'Facturación',
 
     // ── Dashboard ──────────────────────────────────────────
     'dash.title':           'Panel de Control',

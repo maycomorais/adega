@@ -622,13 +622,15 @@
                 <div class="pdv-dado-row">
                   <div style="flex:1">
                     <label class="pdv-dir-label">Cliente (opcional)</label>
-                    <input type="text" id="balcao-cliente" class="pdv-dir-input" placeholder="Nome do cliente" />
+                    <input type="text" id="balcao-cliente" class="pdv-dir-input" placeholder="Nome do cliente"
+                      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
                   </div>
                 </div>
                 <div>
                   <label class="pdv-dir-label">Telefone</label>
                   <input type="tel" id="balcao-telefone" class="form-control"
                     placeholder="Ex: 0981234567"
+                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
                     oninput="pdvTelefoneInput(this.value)" />
 
                   <!-- Box de cashback -->
@@ -729,7 +731,7 @@
                   <option value="CartaoBR">💳🇧🇷 Cartão BR</option>
                   <option value="Pix">🟢 Pix</option>
                   <option value="Transferencia">🏦 Alias (PY)</option>
-                  <option value="NaNota">📋 Colocar na Nota</option>
+                  <option value="NaNota">📋 Na Nota</option>
                   <option value="QrPy">📱 QR Paraguay</option>
                   <option value="Multipagamento">🔀 Dividir</option>
                 </select>
@@ -2731,19 +2733,15 @@
             </label>
           </div>
           <div id="estoque-direto-area" style="display:none">
-            <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-              <div style="flex:1;min-width:120px">
-                <label style="font-size:0.78rem;color:#555;font-weight:600">Quantidade em estoque</label>
-                <input type="number" id="prod-estoque-qtd" class="form-control"
-                  min="0" step="1" placeholder="Ex: 50"
-                  style="margin-top:4px;font-size:1.1rem;font-weight:700;border:2px solid #16a34a">
+            <div class="estoque-fields-row">
+              <div class="estoque-field">
+                <label for="prod-estoque-qtd">Quantidade em estoque</label>
+                <input type="number" id="prod-estoque-qtd" class="form-control" min="0" step="1" placeholder="Ex: 50" />
               </div>
-              <div style="flex:1;min-width:120px">
-                <label style="font-size:0.78rem;color:#555;font-weight:600">Alerta mínimo</label>
-                <input type="number" id="prod-estoque-minimo" class="form-control"
-                  min="0" placeholder="Ex: 5"
-                  style="margin-top:4px">
-                <small style="color:#888;font-size:0.72rem">Alerta quando atingir este valor</small>
+              <div class="estoque-field">
+                <label for="prod-estoque-minimo">Alerta mínimo</label>
+                <input type="number" id="prod-estoque-minimo" class="form-control" min="0" placeholder="Ex: 5" />
+                <!-- <small class="estoque-hint">Alerta quando atingir este valor</small> -->
               </div>
             </div>
           </div>
