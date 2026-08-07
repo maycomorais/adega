@@ -2586,6 +2586,18 @@
           <textarea id="prod-desc" class="form-control" rows="2"></textarea>
         </div>
 
+        <!-- TIPO DE PRODUTO: Simples ou Combo/Kit -->
+        <div class="form-group" style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;padding:12px">
+          <label style="font-weight:700;font-size:0.9rem;color:#5b21b6">🧩 Tipo de Produto</label>
+          <select id="prod-tipo-produto" class="form-control" style="margin-top:6px" onchange="toggleTipoProdutoUI(this.value)">
+            <option value="simples">Produto simples (estoque próprio)</option>
+            <option value="combo">Combo / Kit (consome estoque de outros produtos)</option>
+          </select>
+          <small style="color:#6d28d9;font-size:0.78rem;display:block;margin-top:4px">
+            Ex: "Combo Whiskey" = dose de whiskey + energético + gelo, cada um descontando do estoque do respectivo produto.
+          </small>
+        </div>
+
         <!-- CÓDIGO DE BARRAS -->
         <div class="form-group">
           <label>🔍 Código de Barras / EAN</label>
@@ -2719,8 +2731,8 @@
         </div>
         <!-- ── FIM MARCADORES DE VAREJO ─────────────────────────── -->
 
-        <!-- ── ESTOQUE DIRETO ──────────────────────────────────── -->
-        <div class="form-group" style="background:#f0fff4;border:1.5px solid #a7f3d0;border-radius:10px;padding:12px;margin-top:4px">
+        <!-- ── ESTOQUE DIRETO (apenas produto simples) ─────────── -->
+        <div id="box-estoque-simples" class="form-group" style="background:#f0fff4;border:1.5px solid #a7f3d0;border-radius:10px;padding:12px;margin-top:4px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <label style="font-weight:700;margin:0;font-size:0.9rem">
               📦 Estoque
@@ -2744,7 +2756,41 @@
                 <!-- <small class="estoque-hint">Alerta quando atingir este valor</small> -->
               </div>
             </div>
+
+            <!-- Fracionamento: permite que este produto seja "consumido" em partes por combos -->
+            <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #a7f3d0">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="prod-fracionavel" style="width:18px;height:18px"
+                  onchange="toggleFracionavel(this.checked)">
+                <span style="font-size:0.85rem;font-weight:600">🧪 Este produto pode ser fracionado</span>
+              </label>
+              <small style="color:#888;font-size:0.76rem;display:block;margin:2px 0 8px 26px">
+                Ative para garrafas/itens que serão usados em doses por combos (ex: garrafa de 1000ml → doses de 50ml).
+                A "Quantidade em estoque" acima passa a ser o total nessa unidade.
+              </small>
+              <div id="fracionavel-area" style="display:none;margin-left:26px">
+                <label style="font-size:0.78rem;color:#555">Unidade de fracionamento</label>
+                <select id="prod-unidade-fracionamento" class="form-control" style="max-width:200px">
+                  <option value="ml">Mililitros (ml)</option>
+                  <option value="g">Gramas (g)</option>
+                  <option value="un">Unidades (un)</option>
+                </select>
+              </div>
+            </div>
           </div>
+        </div>
+
+        <!-- ── COMPONENTES DO COMBO (apenas produto tipo combo) ──── -->
+        <div id="box-combo-componentes" class="form-group" style="display:none;background:#faf5ff;border:1.5px solid #d8b4fe;border-radius:10px;padding:12px;margin-top:4px">
+          <label style="font-weight:700;margin:0;font-size:0.9rem;display:block;margin-bottom:2px">
+            🧩 Componentes do Combo
+          </label>
+          <small style="color:#7e22ce;font-size:0.78rem;display:block;margin-bottom:10px">
+            Cada venda deste combo desconta a quantidade indicada do estoque de cada componente abaixo.
+          </small>
+          <div id="combo-componentes-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+          <button type="button" class="btn btn-secondary" style="font-size:0.85rem;padding:6px 12px"
+            onclick="comboAdicionarComponente()">+ Adicionar componente</button>
         </div>
 
         <!-- ── PRODUTO PERECÍVEL & VALIDADE ──────────────────── -->

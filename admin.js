@@ -4725,6 +4725,13 @@ async function salvarProduto() {
       return;
     }
 
+    // ── Combo: exige ao menos 1 componente válido ──────────────
+    const _tipoProdutoVal = document.getElementById("prod-tipo-produto")?.value || "simples";
+    if (_tipoProdutoVal === "combo" && comboColetarComponentes().length === 0) {
+      alert("⚠️ Adicione ao menos um componente ao combo.");
+      return;
+    }
+
     // Preço base — usa dataset.valorNumerico (setado pela máscara) para evitar que
     // parseInt("12.000") retorne 12 ao encontrar o ponto separador de milhar paraguaio
     const _precoEl = document.getElementById("prod-preco");
@@ -4791,10 +4798,21 @@ async function salvarProduto() {
       unidade_venda:
         document.getElementById("prod-unidade-venda")?.value || null,
       destaque: document.getElementById("prod-destaque")?.checked || false,
-      // Estoque direto (sem vínculo com inventário)
-      estoque_qtd: document.getElementById("prod-tem-estoque")?.checked
-        ? parseInt(document.getElementById("prod-estoque-qtd")?.value) || 0
-        : null,
+      // Estoque direto (sem vínculo com inventário) — combos nunca têm
+      // estoque próprio, o estoque vem dos componentes.
+      estoque_qtd:
+        _tipoProdutoVal !== "combo" && document.getElementById("prod-tem-estoque")?.checked
+          ? parseInt(document.getElementById("prod-estoque-qtd")?.value) || 0
+          : null,
+      // ── Combos / fracionamento ─────────────────────────────
+      tipo_produto: _tipoProdutoVal,
+      fracionavel:
+        _tipoProdutoVal !== "combo" &&
+        (document.getElementById("prod-fracionavel")?.checked || false),
+      unidade_fracionamento:
+        _tipoProdutoVal !== "combo" && document.getElementById("prod-fracionavel")?.checked
+          ? document.getElementById("prod-unidade-fracionamento")?.value || "un"
+          : null,
       // ── Preço de compra / custo ───────────────────────────
       preco_compra: (() => {
         const el = document.getElementById("prod-preco-compra");
@@ -4835,6 +4853,11 @@ async function salvarProduto() {
         .single();
       if (errInsert) throw errInsert;
       prodIdSalvo = novoProd.id;
+    }
+
+    // ── Salva componentes do combo ─────────────────────────────
+    if (prodIdSalvo && _tipoProdutoVal === "combo") {
+      await comboSalvarComponentes(prodIdSalvo);
     }
 
     // ── Salva variações de estoque (varejo) ───────────────────
@@ -4988,6 +5011,22 @@ async function abrirModalProduto(produto = null, tipoInicial = null) {
   }
   const _eqResetEl = document.getElementById("prod-estoque-qtd");
   if (_eqResetEl) _eqResetEl.value = "";
+  // ── Combo / Fracionamento reset ────────────────────────────
+  const _tipoResetEl = document.getElementById("prod-tipo-produto");
+  if (_tipoResetEl) {
+    _tipoResetEl.value = "simples";
+    toggleTipoProdutoUI("simples");
+  }
+  const _fracResetEl = document.getElementById("prod-fracionavel");
+  if (_fracResetEl) {
+    _fracResetEl.checked = false;
+    toggleFracionavel(false);
+  }
+  const _unidFracResetEl = document.getElementById("prod-unidade-fracionamento");
+  if (_unidFracResetEl) _unidFracResetEl.value = "ml";
+  const _comboListaResetEl = document.getElementById("combo-componentes-lista");
+  if (_comboListaResetEl) _comboListaResetEl.innerHTML = "";
+  // ── Fim Combo reset ─────────────────────────────────────────
   // Venda por kg
   const _vkResetEl = document.getElementById("prod-venda-kg");
   if (_vkResetEl) {
@@ -5070,6 +5109,25 @@ async function abrirModalProduto(produto = null, tipoInicial = null) {
     }
     const _eqEl = document.getElementById("prod-estoque-qtd");
     if (_eqEl && temEst) _eqEl.value = produto.estoque_qtd;
+
+    // ── Combo / Fracionamento ────────────────────────────────
+    const _tipoProdEl = document.getElementById("prod-tipo-produto");
+    const tipoProdVal = produto.tipo_produto === "combo" ? "combo" : "simples";
+    if (_tipoProdEl) {
+      _tipoProdEl.value = tipoProdVal;
+      toggleTipoProdutoUI(tipoProdVal);
+    }
+    const _fracEl = document.getElementById("prod-fracionavel");
+    if (_fracEl) {
+      _fracEl.checked = produto.fracionavel || false;
+      toggleFracionavel(produto.fracionavel || false);
+    }
+    const _unidFracEl = document.getElementById("prod-unidade-fracionamento");
+    if (_unidFracEl) _unidFracEl.value = produto.unidade_fracionamento || "ml";
+    if (tipoProdVal === "combo") {
+      await comboCarregarComponentesParaEdicao(produto.id);
+    }
+    // ── Fim Combo ─────────────────────────────────────────────
 
     // Venda por Kg
     const eKg = produto.unidade_venda === "kg" && produto.preco_kg > 0;
@@ -9114,6 +9172,12 @@ function _pdvMostrarToast(msg, cor, duracao) {
 }
 
 function adicionarItemPDV(p) {
+  // Combo/Kit → resolve componentes (e eventual escolha de variação) antes de adicionar
+  if (p.tipo_produto === "combo") {
+    _pdvAbrirComboVenda(p);
+    return;
+  }
+
   // montagem_config pode chegar como string JSON de bancos antigos
   let cfg = p.montagem_config;
   if (typeof cfg === "string") {
@@ -9185,6 +9249,155 @@ function adicionarItemPDV(p) {
       if (extras?.length > 0) _mostrarUpsellExtrasPDV(p, extras);
     });
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   COMBOS / KITS — venda no PDV
+   Um combo consome quantidades pré-definidas de outros produtos
+   (fracionadas em ml/g, ou por unidade). Se algum componente
+   permite escolher variação (ex: sabor do gelo), pede a escolha
+   antes de adicionar ao carrinho.
+   ══════════════════════════════════════════════════════════════ */
+async function _pdvAbrirComboVenda(produto) {
+  const { data: componentes, error } = await supa
+    .from("combo_componentes")
+    .select("id, componente_produto_id, quantidade, unidade, permite_variacao, ordem")
+    .eq("combo_produto_id", produto.id)
+    .order("ordem");
+
+  if (error) {
+    alert("⚠️ Erro ao carregar componentes do combo: " + error.message);
+    return;
+  }
+  if (!componentes?.length) {
+    alert("⚠️ Este combo não possui componentes configurados. Edite o produto em Produtos.");
+    return;
+  }
+
+  const idsComponentes = [...new Set(componentes.map((c) => c.componente_produto_id))];
+  const { data: produtosComponentes } = await supa
+    .from("produtos")
+    .select("id, nome")
+    .in("id", idsComponentes);
+  const nomeMap = {};
+  (produtosComponentes || []).forEach((pc) => (nomeMap[pc.id] = pc.nome));
+
+  const componentesComVariacao = componentes.filter((c) => c.permite_variacao);
+  let variacoesPorComponente = {};
+  if (componentesComVariacao.length) {
+    const idsComVar = [...new Set(componentesComVariacao.map((c) => c.componente_produto_id))];
+    const { data: variacoes } = await supa
+      .from("produto_variacoes")
+      .select("id, produto_id, nome, ativo, ordem")
+      .in("produto_id", idsComVar)
+      .eq("ativo", true)
+      .order("ordem");
+    (variacoes || []).forEach((v) => {
+      (variacoesPorComponente[v.produto_id] ||= []).push(v);
+    });
+  }
+
+  const listaFinal = componentes.map((c) => ({
+    componente_produto_id: c.componente_produto_id,
+    nome: nomeMap[c.componente_produto_id] || "Produto",
+    quantidade: c.quantidade,
+    unidade: c.unidade,
+    permite_variacao: c.permite_variacao,
+    variacoes_disponiveis: variacoesPorComponente[c.componente_produto_id] || [],
+    variacao_id: null,
+    variacao_nome: null,
+  }));
+
+  const precisaEscolher = listaFinal.some(
+    (c) => c.permite_variacao && c.variacoes_disponiveis.length > 0,
+  );
+
+  if (precisaEscolher) {
+    _mostrarModalComboVariacoesPDV(produto, listaFinal);
+  } else {
+    _pdvAdicionarComboAoCarrinho(produto, listaFinal);
+  }
+}
+
+function _pdvAdicionarComboAoCarrinho(produto, componentesResolvidos) {
+  carrinhoPDV.push({
+    id: produto.id,
+    nome: produto.nome,
+    img: produto.imagem_url,
+    categoria_slug: produto.categoria_slug || "",
+    preco: produto.preco || 0,
+    qtd: 1,
+    tipo_produto: "combo",
+    combo_componentes: componentesResolvidos.map((c) => ({
+      componente_produto_id: c.componente_produto_id,
+      nome: c.nome,
+      quantidade: c.quantidade,
+      unidade: c.unidade,
+      variacao_id: c.variacao_id,
+      variacao_nome: c.variacao_nome,
+    })),
+    variacao: null,
+    variacao_id: null,
+    montagem: [],
+    obs: "",
+  });
+  atualizarCarrinhoPDV();
+}
+
+function _mostrarModalComboVariacoesPDV(produto, componentes) {
+  document.getElementById("pdv-combo-var-modal")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "pdv-combo-var-modal";
+  overlay.style.cssText =
+    "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px";
+  overlay.onclick = (e) => {
+    if (e.target === overlay) overlay.remove();
+  };
+
+  const modal = document.createElement("div");
+  modal.style.cssText =
+    "background:#fff;border-radius:16px;padding:20px;max-width:440px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3)";
+
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h4 style="margin:0;font-size:1rem;color:#333">🧩 ${produto.nome}</h4>
+      <button id="_pdv-combo-var-close" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:#999">✕</button>
+    </div>
+    <p style="font-size:0.85rem;color:#666;margin:0 0 14px">Escolha as opções deste combo</p>
+    <div id="pdv-combo-var-campos" style="display:flex;flex-direction:column;gap:14px"></div>
+    <button id="_pdv-combo-var-confirmar" style="margin-top:16px;width:100%;padding:11px;background:var(--primary);color:#fff;border:none;border-radius:10px;font-weight:700;cursor:pointer">
+      Adicionar ao pedido
+    </button>
+  `;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  modal.querySelector("#_pdv-combo-var-close").onclick = () => overlay.remove();
+
+  const campos = modal.querySelector("#pdv-combo-var-campos");
+  componentes.forEach((c, idx) => {
+    if (!c.permite_variacao || !c.variacoes_disponiveis.length) return;
+    const bloco = document.createElement("div");
+    bloco.innerHTML = `
+      <label style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:6px;color:#1e293b">${c.nome}</label>
+      <select data-idx="${idx}" class="form-control combo-var-select" style="font-size:0.88rem">
+        ${c.variacoes_disponiveis.map((v) => `<option value="${v.id}">${v.nome}</option>`).join("")}
+      </select>
+    `;
+    campos.appendChild(bloco);
+  });
+
+  modal.querySelector("#_pdv-combo-var-confirmar").onclick = () => {
+    modal.querySelectorAll(".combo-var-select").forEach((sel) => {
+      const idx = parseInt(sel.dataset.idx);
+      const variacaoId = parseInt(sel.value);
+      const variacao = componentes[idx].variacoes_disponiveis.find((v) => v.id === variacaoId);
+      componentes[idx].variacao_id = variacaoId;
+      componentes[idx].variacao_nome = variacao?.nome || null;
+    });
+    _pdvAdicionarComboAoCarrinho(produto, componentes);
+    overlay.remove();
+  };
 }
 
 // ── Modal unificado de opções para PDV ────────────────────────────
@@ -13376,8 +13589,76 @@ function _todosBebidas(itens) {
 // produtos.estoque_qtd (não só via inventario_id) — ver nota em
 // _descontarEstoqueVenda() acima para o contexto completo do bug.
 // Desconta contando os itens do carrinho
+
+/* ══════════════════════════════════════════════════════════════
+   COMBOS — expande itens de combo em "pseudo-itens" dos produtos
+   componentes, para que a baixa de estoque (e a reposição no
+   cancelamento) funcionem sem precisar duplicar lógica em cada
+   função. Itens que não são combo passam direto, sem alteração.
+   Idempotente: pode ser chamada mais de uma vez sem efeito colateral.
+   ══════════════════════════════════════════════════════════════ */
+async function _expandirItensCombo(itens) {
+  if (!itens?.length) return itens;
+
+  const combosSemComponentesIds = new Set();
+  itens.forEach((item) => {
+    const ehCombo = item.tipo_produto === "combo" || item.eh_combo === true;
+    const jaTemComponentes = Array.isArray(item.combo_componentes) && item.combo_componentes.length > 0;
+    if (ehCombo && !jaTemComponentes) {
+      const pid = Number(item.produto_id || item.id);
+      if (pid) combosSemComponentesIds.add(pid);
+    }
+  });
+
+  let componentesPorCombo = {};
+  if (combosSemComponentesIds.size) {
+    const { data } = await supa
+      .from("combo_componentes")
+      .select("combo_produto_id, componente_produto_id, quantidade, unidade")
+      .in("combo_produto_id", [...combosSemComponentesIds]);
+    (data || []).forEach((c) => {
+      (componentesPorCombo[c.combo_produto_id] ||= []).push(c);
+    });
+  }
+
+  const resultado = [];
+  itens.forEach((item) => {
+    const ehCombo = item.tipo_produto === "combo" || item.eh_combo === true;
+    if (!ehCombo) {
+      resultado.push(item);
+      return;
+    }
+
+    const qtdVendida = parseInt(item.qtd || item.q || 1) || 1;
+    const componentes =
+      Array.isArray(item.combo_componentes) && item.combo_componentes.length
+        ? item.combo_componentes
+        : (componentesPorCombo[Number(item.produto_id || item.id)] || []).map((c) => ({
+            componente_produto_id: c.componente_produto_id,
+            quantidade: c.quantidade,
+            variacao_id: null,
+          }));
+
+    componentes.forEach((c) => {
+      const qtdTotal = Math.round((parseFloat(c.quantidade) || 0) * qtdVendida * 100) / 100;
+      if (qtdTotal <= 0) return;
+      resultado.push({
+        produto_id: c.componente_produto_id,
+        id: c.componente_produto_id,
+        qtd: qtdTotal,
+        variacao_id: c.variacao_id || null,
+        _origemCombo: true,
+      });
+    });
+  });
+
+  return resultado;
+}
+
 async function _descontarEstoqueVendaItens(itens) {
   try {
+    if (!itens?.length) return;
+    itens = await _expandirItensCombo(itens);
     if (!itens?.length) return;
 
     // 1. Desconta variações individuais (via RPC)
@@ -13496,6 +13777,12 @@ async function _descontarEstoqueVenda(pedidoId, itensDireto) {
     }
     if (!itens?.length) return;
 
+    // Expande combos em pseudo-itens dos produtos componentes ANTES de
+    // qualquer baixa — assim tanto a etapa 1 (variações) quanto a 2
+    // (estoque_qtd/inventario) abaixo já operam sobre os componentes reais.
+    itens = await _expandirItensCombo(itens);
+    if (!itens?.length) return;
+
     // ------------------------------------------------------------
     // 1. Desconta o estoque das variações (via RPC) para todos os itens
     //    que possuem 'variacao_id'
@@ -13583,12 +13870,16 @@ async function _descontarEstoqueVenda(pedidoId, itensDireto) {
       `${itensSemVariacao.length} item(s) sem variação, ` +
       `${itens.length - itensSemVariacao.length} com variação (via RPC)`
     );
+
+    // Atualiza o "estoque total" agregado de cada produto afetado.
+    // OBS: isto precisa ficar dentro do try — `itens` é local ao bloco
+    // try (declarado com `let` no topo da função) e não existe fora dele.
+    const idsProdutosAfetados = [...new Set(itens.map(i => i.produto_id || i.id).filter(Boolean))];
+    for (const prodId of idsProdutosAfetados) {
+      await supa.rpc('atualizar_estoque_total_produto_manual', { p_produto_id: prodId });
+    }
   } catch (e) {
     console.warn("_descontarEstoqueVenda:", e.message);
-  }
-  const idsProdutosAfetados = [...new Set(itens.map(i => i.produto_id || i.id).filter(Boolean))];
-  for (const prodId of idsProdutosAfetados) {
-    await supa.rpc('atualizar_estoque_total_produto_manual', { p_produto_id: prodId });
   }
 }
 
@@ -13605,11 +13896,31 @@ async function _reporEstoqueCancelamento(pedidoId) {
       .select("itens")
       .eq("id", pedidoId)
       .single();
-    const itens = pedido?.itens;
+    let itens = pedido?.itens;
     if (!itens?.length) return;
 
+    // Expande combos em pseudo-itens dos componentes, para repor o
+    // estoque correto (garrafa de whiskey, gelo, etc.) em vez do combo em si.
+    itens = await _expandirItensCombo(itens);
+    if (!itens?.length) return;
+
+    // ── Repõe variações (contra-parte do decrementar_estoque_variacao) ──
+    const itensComVariacao = itens.filter((i) => i.variacao_id);
+    for (const item of itensComVariacao) {
+      const qtd = parseInt(item.qtd || item.q || 1) || 1;
+      await supa.rpc("incrementar_estoque_variacao", {
+        p_variacao_id: item.variacao_id,
+        p_quantidade: qtd,
+      }).then(() => {}).catch((e) => console.warn("incrementar_estoque_variacao:", e.message));
+    }
+    const itensSemVariacao = itens.filter((i) => !i.variacao_id);
+    if (!itensSemVariacao.length) {
+      console.log(`✅ Estoque reposto (variações): pedido cancelado #${pedidoId}`);
+      return;
+    }
+
     const prodIds = [
-      ...new Set(itens.map((i) => i.produto_id || i.id).filter(Boolean)),
+      ...new Set(itensSemVariacao.map((i) => i.produto_id || i.id).filter(Boolean)),
     ];
     if (!prodIds.length) return;
 
@@ -13620,7 +13931,7 @@ async function _reporEstoqueCancelamento(pedidoId) {
     if (!prods?.length) return;
 
     const qtdPorProduto = {};
-    itens.forEach((item) => {
+    itensSemVariacao.forEach((item) => {
       const pid = Number(item.produto_id || item.id);
       if (!pid) return;
       qtdPorProduto[pid] = (qtdPorProduto[pid] || 0) + (item.qtd || item.q || 1);
@@ -14261,6 +14572,150 @@ function toggleVendaKg(on) {
     const unid = document.getElementById("prod-unidade-venda");
     if (unid) unid.value = "kg";
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   COMBOS / KITS — produtos compostos que descontam estoque de
+   outros produtos (fracionado ou por unidade inteira).
+   ══════════════════════════════════════════════════════════════ */
+
+// Alterna a interface do modal entre "Produto simples" e "Combo"
+function toggleTipoProdutoUI(tipo) {
+  const boxSimples = document.getElementById("box-estoque-simples");
+  const boxCombo = document.getElementById("box-combo-componentes");
+  if (boxSimples) boxSimples.style.display = tipo === "combo" ? "none" : "block";
+  if (boxCombo) boxCombo.style.display = tipo === "combo" ? "block" : "none";
+
+  // Combos não têm venda por Kg (isso é um marcador de produto simples)
+  const vk = document.getElementById("prod-venda-kg");
+  if (tipo === "combo" && vk?.checked) {
+    vk.checked = false;
+    toggleVendaKg(false);
+  }
+}
+
+function toggleFracionavel(on) {
+  const area = document.getElementById("fracionavel-area");
+  if (area) area.style.display = on ? "block" : "none";
+}
+
+let _comboRowSeq = 0;
+
+// Adiciona uma linha de componente ao builder do combo.
+// `dados` pode vir preenchido ao editar um combo existente.
+function comboAdicionarComponente(dados = {}) {
+  const lista = document.getElementById("combo-componentes-lista");
+  if (!lista) return;
+
+  const rowId = "combo-row-" + ++_comboRowSeq;
+  const row = document.createElement("div");
+  row.id = rowId;
+  row.className = "combo-componente-row";
+  row.style.cssText =
+    "display:flex;gap:6px;align-items:flex-start;background:#fff;border:1px solid #e9d5ff;border-radius:8px;padding:8px;flex-wrap:wrap";
+
+  // Produtos elegíveis como componente: exclui combos (para não permitir
+  // combo dentro de combo) e o próprio produto em edição.
+  const idAtual = parseInt(document.getElementById("prod-id")?.value) || null;
+  const opcoes = (_todosProdutos || [])
+    .filter((p) => p.tipo_produto !== "combo" && p.id !== idAtual)
+    .map(
+      (p) =>
+        `<option value="${p.id}" data-unidade="${p.unidade_fracionamento || "un"}"
+           ${dados.componente_produto_id === p.id ? "selected" : ""}>${p.nome}</option>`,
+    )
+    .join("");
+
+  row.innerHTML = `
+    <div style="flex:2;min-width:160px">
+      <select class="form-control combo-sel-produto" style="font-size:0.85rem"
+        onchange="_comboAtualizarUnidadeLinha('${rowId}')">
+        <option value="">— Selecione o produto —</option>
+        ${opcoes}
+      </select>
+    </div>
+    <div style="width:90px">
+      <input type="number" class="form-control combo-inp-qtd" min="0.01" step="0.01"
+        placeholder="Qtd" style="font-size:0.85rem" value="${dados.quantidade ?? ""}">
+    </div>
+    <div style="width:90px">
+      <select class="form-control combo-sel-unidade" style="font-size:0.85rem">
+        <option value="ml" ${dados.unidade === "ml" ? "selected" : ""}>ml</option>
+        <option value="g" ${dados.unidade === "g" ? "selected" : ""}>g</option>
+        <option value="un" ${!dados.unidade || dados.unidade === "un" ? "selected" : ""}>un</option>
+      </select>
+    </div>
+    <label style="display:flex;align-items:center;gap:4px;font-size:0.76rem;color:#555;white-space:nowrap;padding-top:8px">
+      <input type="checkbox" class="combo-chk-variacao" ${dados.permite_variacao ? "checked" : ""}>
+      Variação na venda
+    </label>
+    <button type="button" onclick="document.getElementById('${rowId}').remove()"
+      style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;width:30px;height:30px;cursor:pointer;font-weight:700">×</button>
+  `;
+  lista.appendChild(row);
+
+  // Se já veio com produto+unidade definidos (edição), aplica a unidade sugerida
+  if (dados.componente_produto_id) _comboAtualizarUnidadeLinha(rowId, dados.unidade);
+}
+
+// Ao escolher um produto componente, sugere automaticamente a unidade
+// de fracionamento cadastrada nele (mas permite o usuário sobrescrever).
+function _comboAtualizarUnidadeLinha(rowId, forcarUnidade = null) {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  const sel = row.querySelector(".combo-sel-produto");
+  const unidSel = row.querySelector(".combo-sel-unidade");
+  if (!sel || !unidSel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const unidadeSugerida = forcarUnidade || opt?.dataset?.unidade || "un";
+  unidSel.value = unidadeSugerida;
+}
+
+function comboColetarComponentes() {
+  const linhas = document.querySelectorAll("#combo-componentes-lista .combo-componente-row");
+  const componentes = [];
+  linhas.forEach((row, idx) => {
+    const produtoId = parseInt(row.querySelector(".combo-sel-produto")?.value) || null;
+    const quantidade = parseFloat(row.querySelector(".combo-inp-qtd")?.value) || 0;
+    const unidade = row.querySelector(".combo-sel-unidade")?.value || "un";
+    const permiteVariacao = row.querySelector(".combo-chk-variacao")?.checked || false;
+    if (produtoId && quantidade > 0) {
+      componentes.push({
+        componente_produto_id: produtoId,
+        quantidade,
+        unidade,
+        permite_variacao: permiteVariacao,
+        ordem: idx,
+      });
+    }
+  });
+  return componentes;
+}
+
+async function comboSalvarComponentes(comboProdutoId) {
+  const componentes = comboColetarComponentes();
+  // Substitui a receita inteira (mais simples e evita órfãos)
+  await supa.from("combo_componentes").delete().eq("combo_produto_id", comboProdutoId);
+  if (componentes.length) {
+    await supa.from("combo_componentes").insert(
+      componentes.map((c) => ({ ...c, combo_produto_id: comboProdutoId })),
+    );
+  }
+}
+
+async function comboCarregarComponentesParaEdicao(comboProdutoId) {
+  const lista = document.getElementById("combo-componentes-lista");
+  if (lista) lista.innerHTML = "";
+  const { data, error } = await supa
+    .from("combo_componentes")
+    .select("componente_produto_id, quantidade, unidade, permite_variacao")
+    .eq("combo_produto_id", comboProdutoId)
+    .order("ordem");
+  if (error) {
+    console.warn("comboCarregarComponentesParaEdicao:", error.message);
+    return;
+  }
+  (data || []).forEach((c) => comboAdicionarComponente(c));
 }
 
 // =========================================
