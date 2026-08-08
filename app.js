@@ -667,10 +667,10 @@ async function renderMenu() {
   content.innerHTML = "";
 
   // Busca Categorias, Subcategorias e Produtos ativos
-  const { data: categsDb } = await supa
+  const { data: categsDb, error: errCategs } = await supa
     .from("categorias")
     .select("*")
-    .eq("ativo", true)
+    .eq("ativa", true)
     .order("ordem");
   let subcatsDb = [];
   try {
@@ -682,7 +682,7 @@ async function renderMenu() {
   } catch (_) {
     subcatsDb = [];
   }
-  const { data: produtos } = await supa
+  const { data: produtos, error: errProdutos } = await supa
     .from("produtos")
     .select("*")
     .eq("ativo", true)
@@ -691,7 +691,7 @@ async function renderMenu() {
     .limit(5000);
 
   if (!produtos || !categsDb) {
-    console.error("Erro ao carregar menu do banco");
+    console.error("Erro ao carregar menu do banco — categorias:", errCategs, "produtos:", errProdutos);
     return;
   }
 
@@ -779,7 +779,11 @@ async function renderMenu() {
   }
 
   function renderProdutoDiv(item) {
+   try {
     const img = item.img || "";
+    // Blindagem: preco nulo/indefinido nunca deve quebrar a renderização
+    // (ex: um combo salvo sem preço, ou produto com dado incompleto no banco)
+    item.preco = (typeof item.preco === "number" && !isNaN(item.preco)) ? item.preco : 0;
     let cfg = item.montagem;
     if (typeof cfg === "string") {
       try { cfg = JSON.parse(cfg); } catch (_) { cfg = null; }
@@ -802,7 +806,7 @@ async function renderMenu() {
       discountBadge = `<span class="prod-badge-discount">-${pct}%</span>`;
       precoLabel = `
         <div class="prod-promo-row">
-          <span class="prod-price-old">Gs ${item.preco_original.toLocaleString("es-PY")}</span>
+          <span class="prod-price-old">Gs ${(item.preco_original || 0).toLocaleString("es-PY")}</span>
           <span class="prod-price-promo-label">Promo Gs ${item.preco.toLocaleString("es-PY")}</span>
         </div>
         ${_brl(item.preco)}`;
@@ -847,6 +851,19 @@ async function renderMenu() {
       </button>
     `;
     return div;
+   } catch (e) {
+    // Nunca deixa um único produto quebrado derrubar a renderização
+    // de todos os outros produtos/categorias.
+    console.error("Erro ao renderizar produto:", item?.id, item?.nome, e);
+    const fallback = document.createElement("div");
+    fallback.className = "product-item";
+    fallback.innerHTML = `
+      <div class="prod-info">
+        <div class="prod-title">${item?.nome || "Produto"}</div>
+        <div class="prod-price">Indisponível</div>
+      </div>`;
+    return fallback;
+   }
   }
 
   // ── Wrapper: create or reuse grid container ─────────────────
