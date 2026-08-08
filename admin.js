@@ -13871,13 +13871,15 @@ async function _descontarEstoqueVenda(pedidoId, itensDireto) {
       `${itens.length - itensSemVariacao.length} com variação (via RPC)`
     );
 
-    // Atualiza o "estoque total" agregado de cada produto afetado.
-    // OBS: isto precisa ficar dentro do try — `itens` é local ao bloco
-    // try (declarado com `let` no topo da função) e não existe fora dele.
-    const idsProdutosAfetados = [...new Set(itens.map(i => i.produto_id || i.id).filter(Boolean))];
-    for (const prodId of idsProdutosAfetados) {
-      await supa.rpc('atualizar_estoque_total_produto_manual', { p_produto_id: prodId });
-    }
+    // ⚠️ REMOVIDO: chamada a atualizar_estoque_total_produto_manual().
+    // Essa chamada existia no código mas ficava após um bug de escopo
+    // que a impedia de rodar (ver histórico) — ou seja, nunca havia
+    // sido executada de fato. Ao corrigir o bug de escopo, ela passou
+    // a rodar e zerou o estoque de produtos sem variação (a função do
+    // banco parece recalcular o total a partir de produto_variacoes,
+    // que fica vazio para produtos com controle direto de estoque).
+    // A baixa de estoque já é feita corretamente logo acima, sem
+    // depender dessa função — por isso ela foi retirada daqui.
   } catch (e) {
     console.warn("_descontarEstoqueVenda:", e.message);
   }
