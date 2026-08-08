@@ -13784,92 +13784,22 @@ async function _descontarEstoqueVenda(pedidoId, itensDireto) {
     if (!itens?.length) return;
 
     // ------------------------------------------------------------
-    // 1. Desconta o estoque das variações (via RPC) para todos os itens
-    //    que possuem 'variacao_id'
+    // 1. Desconta o estoque de TODOS os itens da venda.
+    //    _descontarEstoqueVendaItens() já cuida de tudo sozinha:
+    //    variação (via RPC), estoque_qtd direto do produto, E
+    //    inventário vinculado (inventario_id) — para qualquer item,
+    //    com ou sem variação. Não é preciso (nem deve) repetir essa
+    //    baixa aqui embaixo.
     // ------------------------------------------------------------
     await _descontarEstoqueVendaItens(itens);
 
-    // ------------------------------------------------------------
-    // 2. Desconta o estoque geral APENAS dos itens SEM variacao_id
-    //    (itens simples, sem variação)
-    // ------------------------------------------------------------
-    const itensSemVariacao = itens.filter(item => !item.variacao_id);
-    if (!itensSemVariacao.length) {
-      // Se todos os itens têm variação, não há mais o que fazer aqui.
-      return;
-    }
+    console.log(`✅ Estoque descontado: pedido ${pedidoId || "(PDV)"}, ${itens.length} item(s)`);
 
-    // Soma quantidades por produto (apenas itens sem variação)
-    const qtdPorProduto = {};
-    itensSemVariacao.forEach((item) => {
-      const pid = Number(item.produto_id || item.id);
-      if (!pid) return;
-      const qtd = parseInt(item.qtd || item.q || 1) || 1;
-      qtdPorProduto[pid] = (qtdPorProduto[pid] || 0) + qtd;
-    });
-
-    const prodIds = Object.keys(qtdPorProduto).map(Number);
-    if (!prodIds.length) return;
-
-    // Busca produtos (para saber se têm inventario_id e/ou estoque_qtd)
-    const { data: prods } = await supa
-      .from("produtos")
-      .select("id, inventario_id, estoque_qtd")
-      .in("id", prodIds);
-
-    if (!prods?.length) return;
-
-    // 2a. Desconta via inventario_id (estoque vinculado a insumos)
-    const descontosInventario = {};
-    prods.forEach((prod) => {
-      if (!prod.inventario_id) return;
-      const qtd = qtdPorProduto[prod.id] || 0;
-      if (qtd > 0) {
-        descontosInventario[prod.inventario_id] =
-          (descontosInventario[prod.inventario_id] || 0) + qtd;
-      }
-    });
-
-    if (Object.keys(descontosInventario).length) {
-      const invIds = Object.keys(descontosInventario).map(Number);
-      const { data: estoques } = await supa
-        .from("inventario")
-        .select("id, quantidade")
-        .in("id", invIds);
-      for (const est of estoques || []) {
-        const nova = Math.max(0, (est.quantidade || 0) - descontosInventario[est.id]);
-        await supa.from("inventario").update({ quantidade: nova }).eq("id", est.id);
-        await supa
-          .from("inventario_movimentos")
-          .insert([{
-            inventario_id: est.id,
-            tipo: "sub",
-            quantidade: descontosInventario[est.id],
-            motivo: pedidoId ? `Venda — Pedido #${pedidoId}` : "Venda PDV",
-            usuario_email: "sistema",
-          }])
-          .then(() => {})
-          .catch(() => {});
-      }
-    }
-
-    // 2b. Desconta estoque_qtd direto no produto (para itens sem inventario_id)
-    for (const prod of prods) {
-      if (prod.inventario_id) continue; // já descontado acima
-      const qtd = qtdPorProduto[prod.id] || 0;
-      if (!qtd) continue;
-      if (prod.estoque_qtd === null || prod.estoque_qtd === undefined) continue;
-      const novaQtd = Math.max(0, (prod.estoque_qtd || 0) - qtd);
-      const updatePayload = { estoque_qtd: novaQtd };
-      if (novaQtd === 0) updatePayload.ativo = false;
-      await supa.from("produtos").update(updatePayload).eq("id", prod.id);
-    }
-
-    console.log(
-      `✅ Estoque descontado: pedido ${pedidoId || "(PDV)"}, ` +
-      `${itensSemVariacao.length} item(s) sem variação, ` +
-      `${itens.length - itensSemVariacao.length} com variação (via RPC)`
-    );
+    // ⚠️ REMOVIDO: bloco duplicado que descontava estoque_qtd/inventario
+    // NOVAMENTE aqui para os itens sem variação — causava baixa em DOBRO
+    // em toda venda de produto simples, já que _descontarEstoqueVendaItens()
+    // logo acima já faz exatamente essa mesma baixa para todos os itens
+    // (com ou sem variação).
 
     // ⚠️ REMOVIDO: chamada a atualizar_estoque_total_produto_manual().
     // Essa chamada existia no código mas ficava após um bug de escopo
